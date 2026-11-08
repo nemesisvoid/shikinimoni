@@ -1,0 +1,451 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["public", "neon_auth"]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Identity: owned by Neon Auth (Managed Better Auth)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Mirrors `neon_auth.user`. Neon Auth creates and migrates this table; it is
+/// listed under `tables.external` in prisma.config.ts so Prisma never alters it.
+/// Read it with Prisma, but create/update/ban users through the auth API
+/// (sign-up, admin plugin) or `neon neon-auth user ...`, never Prisma writes.
+/// `role` comes from the Better Auth admin plugin: "admin" grants dashboard access.
+/// It is text, not an enum: Neon Auth owns the column and stores multiple roles
+/// comma-separated ("user,admin"). Typed roles live in lib/auth/guards.ts (ROLES).
+model User {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name          String
+  email         String    @unique
+  emailVerified Boolean
+  image         String?
+  createdAt     DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime  @default(now()) @db.Timestamptz(6)
+  role          String?
+  banned        Boolean?
+  banReason     String?
+  banExpires    DateTime? @db.Timestamptz(6)
+
+  propertiesCreated Property[]         @relation("PropertyCreatedBy")
+  propertiesUpdated Property[]         @relation("PropertyUpdatedBy")
+  mediaUploaded     PropertyMedia[]
+  documentsUploaded PropertyDocument[]
+  favorites         Favorite[]
+  inquiries         Inquiry[]          @relation("InquirySender")
+  inquiriesAssigned Inquiry[]          @relation("InquiryAssignee")
+  auditLogs         AuditLog[]
+
+  @@map("user")
+  @@schema("neon_auth")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Broad bucket used for top-level search filters.
+enum PropertyCategory {
+  RESIDENTIAL
+  COMMERCIAL
+  LAND
+  INDUSTRIAL
+  AGRICULTURAL
+  MIXED_USE
+
+  @@schema("public")
+}
+
+/// Specific kind of property within a category.
+enum PropertyType {
+  // Land
+  RESIDENTIAL_LAND
+  COMMERCIAL_LAND
+  FARMLAND
+  // Residential
+  APARTMENT
+  BUNGALOW
+  DUPLEX
+  SEMI_DETACHED_DUPLEX
+  TERRACE
+  DETACHED_HOUSE
+  PENTHOUSE
+  MAISONETTE
+  STUDIO
+  // Commercial / industrial
+  OFFICE
+  SHOP
+  WAREHOUSE
+  HOTEL
+  EVENT_CENTRE
+  FILLING_STATION
+  OTHER
+
+  @@schema("public")
+}
+
+enum ListingType {
+  SALE
+  RENT
+  LEASE
+  SHORT_LET
+
+  @@schema("public")
+}
+
+/// Editorial state: only PUBLISHED listings are visible to the public.
+enum ListingStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+
+  @@schema("public")
+}
+
+/// Market state, independent of whether the listing is published.
+enum Availability {
+  AVAILABLE
+  UNDER_OFFER
+  SOLD
+  RENTED
+  OFF_MARKET
+
+  @@schema("public")
+}
+
+enum PricePeriod {
+  TOTAL
+  PER_YEAR
+  PER_MONTH
+  PER_WEEK
+  PER_NIGHT
+
+  @@schema("public")
+}
+
+/// Unit the size was entered in. A "plot" varies by region, so the app also
+/// stores a normalized `landAreaSqm` for filtering and sorting.
+enum SizeUnit {
+  SQM
+  SQFT
+  PLOT
+  ACRE
+  HECTARE
+
+  @@schema("public")
+}
+
+enum Furnishing {
+  UNFURNISHED
+  SEMI_FURNISHED
+  FURNISHED
+
+  @@schema("public")
+}
+
+enum MediaType {
+  IMAGE
+  VIDEO
+  FLOOR_PLAN
+  VIRTUAL_TOUR
+
+  @@schema("public")
+}
+
+enum DocumentType {
+  TITLE_DOCUMENT
+  SURVEY_PLAN
+  DEED
+  BUILDING_APPROVAL
+  RECEIPT
+  OTHER
+
+  @@schema("public")
+}
+
+enum InquiryType {
+  GENERAL
+  VIEWING_REQUEST
+  OFFER
+
+  @@schema("public")
+}
+
+enum InquiryStatus {
+  NEW
+  IN_PROGRESS
+  CLOSED
+  SPAM
+
+  @@schema("public")
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  RESTORE
+  PUBLISH
+  UNPUBLISH
+  STATUS_CHANGE
+
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Listings
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Property {
+  id        String @id @default(uuid(7)) @db.Uuid
+  /// Human-friendly, sequential reference shown to customers (format in the UI, e.g. "PRP-000123").
+  refNumber Int    @unique @default(autoincrement())
+  slug      String @unique @db.VarChar(200)
+
+  name        String  @db.VarChar(200)
+  summary     String? @db.VarChar(500)
+  description String  @db.Text
+
+  category     PropertyCategory
+  type         PropertyType
+  listingType  ListingType
+  status       ListingStatus    @default(DRAFT)
+  availability Availability     @default(AVAILABLE)
+  isFeatured   Boolean          @default(false)
+
+  // Pricing. `price` null = "price on request". Money is never stored as float.
+  price         Decimal?    @db.Decimal(15, 2)
+  /// ISO 4217 code, e.g. "NGN", "USD".
+  currency      String      @db.Char(3)
+  pricePeriod   PricePeriod @default(TOTAL)
+  isNegotiable  Boolean     @default(false)
+  serviceCharge Decimal?    @db.Decimal(15, 2)
+
+  // Size. `landSize` + `landSizeUnit` is what the admin entered (e.g. 2 PLOT);
+  // `landAreaSqm` is the normalized value the app computes for filters/sorting.
+  landSize     Decimal?  @db.Decimal(12, 4)
+  landSizeUnit SizeUnit?
+  landAreaSqm  Decimal?  @db.Decimal(14, 2)
+  floorAreaSqm Decimal?  @db.Decimal(12, 2)
+
+  // Layout (null for land)
+  bedrooms      Int?        @db.SmallInt
+  bathrooms     Int?        @db.SmallInt
+  toilets       Int?        @db.SmallInt
+  parkingSpaces Int?        @db.SmallInt
+  floors        Int?        @db.SmallInt
+  yearBuilt     Int?        @db.SmallInt
+  furnishing    Furnishing?
+  /// Title held, e.g. "Certificate of Occupancy", "Governor's Consent", "Freehold".
+  titleType     String?     @db.VarChar(120)
+
+  // Location
+  addressLine1     String?  @db.VarChar(200)
+  addressLine2     String?  @db.VarChar(200)
+  neighborhood     String?  @db.VarChar(120)
+  city             String   @db.VarChar(120)
+  /// State, province or region.
+  state            String   @db.VarChar(120)
+  /// ISO 3166-1 alpha-2, e.g. "NG".
+  country          String   @db.Char(2)
+  postalCode       String?  @db.VarChar(20)
+  latitude         Decimal? @db.Decimal(9, 6)
+  longitude        Decimal? @db.Decimal(9, 6)
+  /// When false, the public site shows only neighborhood/city, not the street address or pin.
+  showExactAddress Boolean  @default(true)
+
+  viewCount   Int       @default(0)
+  publishedAt DateTime? @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @db.Timestamptz(3)
+  /// Soft delete: admins can restore; public queries must filter `deletedAt: null`.
+  deletedAt   DateTime? @db.Timestamptz(3)
+
+  createdById String? @db.Uuid
+  createdBy   User?   @relation("PropertyCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById String? @db.Uuid
+  updatedBy   User?   @relation("PropertyUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  media     PropertyMedia[]
+  documents PropertyDocument[]
+  amenities PropertyAmenity[]
+  favorites Favorite[]
+  inquiries Inquiry[]
+
+  // Public search: published, live listings, newest first
+  @@index([status, deletedAt, publishedAt(sort: Desc)])
+  @@index([listingType, category, type])
+  @@index([country, state, city])
+  @@index([price])
+  @@index([landAreaSqm])
+  @@index([bedrooms])
+  @@index([isFeatured, publishedAt(sort: Desc)])
+  @@index([createdById])
+  @@index([updatedById])
+  @@map("properties")
+  @@schema("public")
+}
+
+/// Photos, videos, floor plans and tour links. Files live in object storage;
+/// the database stores the storage key (for deletes) and a public URL.
+model PropertyMedia {
+  id         String    @id @default(uuid(7)) @db.Uuid
+  propertyId String    @db.Uuid
+  type       MediaType @default(IMAGE)
+  /// Object-storage key. Null for external links (e.g. a YouTube video or 3D tour).
+  storageKey String?   @unique @db.VarChar(512)
+  url        String    @db.Text
+  altText    String?   @db.VarChar(200)
+  caption    String?   @db.VarChar(300)
+  mimeType   String?   @db.VarChar(100)
+  sizeBytes  Int?
+  width      Int?
+  height     Int?
+  sortOrder  Int       @default(0)
+  /// Exactly one cover per property: enforce in the same transaction that sets it.
+  isCover    Boolean   @default(false)
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+
+  property     Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  uploadedById String?  @db.Uuid
+  uploadedBy   User?    @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@index([propertyId, sortOrder])
+  @@index([uploadedById])
+  @@map("property_media")
+  @@schema("public")
+}
+
+/// Title documents, survey plans, approvals. Private by default (admin-only);
+/// serve private files through signed URLs, never a public bucket URL.
+model PropertyDocument {
+  id         String       @id @default(uuid(7)) @db.Uuid
+  propertyId String       @db.Uuid
+  type       DocumentType
+  name       String       @db.VarChar(200)
+  storageKey String       @unique @db.VarChar(512)
+  mimeType   String?      @db.VarChar(100)
+  sizeBytes  Int?
+  isPublic   Boolean      @default(false)
+  createdAt  DateTime     @default(now()) @db.Timestamptz(3)
+
+  property     Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  uploadedById String?  @db.Uuid
+  uploadedBy   User?    @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  @@index([propertyId])
+  @@index([uploadedById])
+  @@map("property_documents")
+  @@schema("public")
+}
+
+/// Admin-managed catalogue: "Swimming pool", "24/7 power", "Gated estate", ...
+model Amenity {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique @db.VarChar(80)
+  slug      String   @unique @db.VarChar(80)
+  /// Grouping for the UI, e.g. "Security", "Utilities", "Leisure".
+  group     String?  @db.VarChar(60)
+  icon      String?  @db.VarChar(60)
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  properties PropertyAmenity[]
+
+  @@map("amenities")
+  @@schema("public")
+}
+
+model PropertyAmenity {
+  propertyId String @db.Uuid
+  amenityId  Int
+
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  amenity  Amenity  @relation(fields: [amenityId], references: [id], onDelete: Cascade)
+
+  @@id([propertyId, amenityId])
+  @@index([amenityId])
+  @@map("property_amenities")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Engagement
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Favorite {
+  userId     String   @db.Uuid
+  propertyId String   @db.Uuid
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  property Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@id([userId, propertyId])
+  @@index([propertyId])
+  @@map("favorites")
+  @@schema("public")
+}
+
+/// Leads from the public site. Contact details are copied onto the inquiry so
+/// guests can enquire without an account and history survives user deletion.
+model Inquiry {
+  id                 String        @id @default(uuid(7)) @db.Uuid
+  type               InquiryType   @default(GENERAL)
+  status             InquiryStatus @default(NEW)
+  name               String        @db.VarChar(120)
+  email              String        @db.VarChar(254)
+  phone              String?       @db.VarChar(30)
+  message            String        @db.Text
+  preferredViewingAt DateTime?     @db.Timestamptz(3)
+  /// Internal notes; never expose to the sender.
+  adminNotes         String?       @db.Text
+  respondedAt        DateTime?     @db.Timestamptz(3)
+  createdAt          DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime      @updatedAt @db.Timestamptz(3)
+
+  propertyId   String?   @db.Uuid
+  property     Property? @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  userId       String?   @db.Uuid
+  user         User?     @relation("InquirySender", fields: [userId], references: [id], onDelete: SetNull)
+  assignedToId String?   @db.Uuid
+  assignedTo   User?     @relation("InquiryAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([propertyId])
+  @@index([userId])
+  @@index([assignedToId])
+  @@map("inquiries")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Append-only record of admin actions (who changed what, when).
+model AuditLog {
+  id         String      @id @default(uuid(7)) @db.Uuid
+  action     AuditAction
+  /// e.g. "Property", "PropertyMedia", "Inquiry", "User"
+  entityType String      @db.VarChar(50)
+  entityId   String      @db.VarChar(64)
+  /// Changed fields, e.g. { "price": { "from": "1000000", "to": "950000" } }
+  changes    Json?
+  ipAddress  String?     @db.VarChar(45)
+  userAgent  String?     @db.VarChar(500)
+  createdAt  DateTime    @default(now()) @db.Timestamptz(3)
+
+  actorId String? @db.Uuid
+  actor   User?   @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([entityType, entityId, createdAt(sort: Desc)])
+  @@index([actorId, createdAt(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+  @@map("audit_logs")
+  @@schema("public")
+}
