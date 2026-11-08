@@ -136,7 +136,9 @@ export function toSchemaInput(values: PropertyFormValues) {
 /** Form sections, in page order. Used for the jump links and their error dots. */
 export const FORM_SECTIONS = [
   { id: "basics", title: "Basics", fields: ["name", "summary", "description", "slug"] },
+  { id: "photos", title: "Photos", fields: [] },
   { id: "listing", title: "Listing type", fields: ["listingType", "category", "type", "titleType"] },
+  { id: "documents", title: "Documents", fields: [] },
   { id: "price", title: "Price", fields: ["price", "currency", "pricePeriod", "isNegotiable", "serviceCharge"] },
   { id: "size", title: "Size and rooms", fields: ["landSize", "landSizeUnit", "landAreaSqm", ...BUILDING_FIELDS] },
   {
