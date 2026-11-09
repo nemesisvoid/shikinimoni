@@ -10,7 +10,7 @@ import { auth } from '@/lib/auth/server';
 // Role checks (admin) are never done here; always use requireAdmin().
 export default auth.middleware({
   loginUrl: '/auth/sign-in',
-  publicRoutes: ['/', '/properties', '/properties/:id'],
+  publicRoutes: ['/', '/contact', '/properties', '/properties/:id'],
 });
 
 export const config = {

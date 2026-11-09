@@ -16,7 +16,7 @@ const COLUMNS = [
     links: [
       { href: "/#how-it-works", label: "How buying works" },
       { href: "/#sell", label: "Sell with us" },
-      { href: `mailto:${siteConfig.contactEmail}`, label: "Contact" },
+      { href: "/contact", label: "Contact" },
     ],
   },
 ];

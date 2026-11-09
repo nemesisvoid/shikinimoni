@@ -4,4 +4,5 @@ export const MAIN_NAV = [
   { href: "/?type=rent#listings", label: "Rent" },
   { href: "/?type=land#listings", label: "Land" },
   { href: "/#how-it-works", label: "How buying works" },
+  { href: "/contact", label: "Contact" },
 ] as const;
