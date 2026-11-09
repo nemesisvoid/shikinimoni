@@ -1,27 +1,29 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type DragEvent } from "react";
+import Image from "next/image";
 import { ArrowLeft, ArrowRight, ImagePlus, Star, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { IMAGE_MIME_TYPES, MAX_IMAGE_BYTES, MAX_MEDIA_PER_PROPERTY } from "@/schemas/media.schema";
-import type { StagedPhoto } from "./upload-files";
+import type { PhotoItem, StagedPhoto } from "./upload-files";
 
 const MAX_MB = MAX_IMAGE_BYTES / 1024 / 1024;
 const ACCEPT = IMAGE_MIME_TYPES.join(",");
 
 /**
- * Pick, preview, order and describe photos before they upload. The first photo
- * is the cover. Nothing leaves the browser until the property is saved.
+ * Pick, preview, order and describe photos. The first photo is the cover. On the
+ * edit page, saved photos sit in the same list as new ones; nothing changes in
+ * storage until the property is saved.
  */
 export function PhotoPicker({
   photos,
   onChange,
   disabled,
 }: {
-  photos: StagedPhoto[];
-  onChange: (photos: StagedPhoto[]) => void;
+  photos: PhotoItem[];
+  onChange: (photos: PhotoItem[]) => void;
   disabled?: boolean;
 }) {
   const inputId = useId();
@@ -34,7 +36,7 @@ export function PhotoPicker({
   useEffect(() => {
     latest.current = photos;
   }, [photos]);
-  useEffect(() => () => latest.current.forEach((p) => URL.revokeObjectURL(p.previewUrl)), []);
+  useEffect(() => () => latest.current.forEach((p) => p.kind === "new" && URL.revokeObjectURL(p.previewUrl)), []);
 
   async function addFiles(files: File[]) {
     const problems: string[] = [];
@@ -57,17 +59,17 @@ export function PhotoPicker({
     const staged = await Promise.all(
       accepted.map(async (file): Promise<StagedPhoto> => {
         const size = await readDimensions(file);
-        return { id: crypto.randomUUID(), file, previewUrl: URL.createObjectURL(file), altText: "", ...size };
+        return { kind: "new", id: crypto.randomUUID(), file, previewUrl: URL.createObjectURL(file), altText: "", ...size };
       }),
     );
     onChange([...photos, ...staged]);
   }
 
-  const update = (id: string, patch: Partial<StagedPhoto>) =>
-    onChange(photos.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+  const setAltText = (id: string, altText: string) =>
+    onChange(photos.map((p) => (p.id === id ? { ...p, altText } : p)));
 
-  const remove = (photo: StagedPhoto) => {
-    URL.revokeObjectURL(photo.previewUrl);
+  const remove = (photo: PhotoItem) => {
+    if (photo.kind === "new") URL.revokeObjectURL(photo.previewUrl);
     onChange(photos.filter((p) => p.id !== photo.id));
   };
 
@@ -148,8 +150,12 @@ export function PhotoPicker({
                       isCover && "ring-2 ring-primary ring-offset-2 ring-offset-card",
                     )}
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element -- local blob: preview, nothing to optimise */}
-                    <img src={photo.previewUrl} alt="" className="size-full object-cover" />
+                    {photo.kind === "saved" ? (
+                      <Image src={photo.url} alt="" fill sizes="(min-width: 1024px) 20rem, (min-width: 640px) 50vw, 100vw" className="object-cover" />
+                    ) : (
+                      // eslint-disable-next-line @next/next/no-img-element -- local blob: preview, nothing to optimise
+                      <img src={photo.previewUrl} alt="" className="size-full object-cover" />
+                    )}
 
                     {isCover && (
                       <span className="absolute top-2 left-2 flex items-center gap-1 rounded-full bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground">
@@ -209,7 +215,7 @@ export function PhotoPicker({
                   </div>
                   <Input
                     value={photo.altText}
-                    onChange={(e) => update(photo.id, { altText: e.target.value })}
+                    onChange={(e) => setAltText(photo.id, e.target.value)}
                     disabled={disabled}
                     maxLength={200}
                     placeholder="Describe the photo, e.g. Living room"

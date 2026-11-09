@@ -70,3 +70,12 @@ export function initialsFor(name: string | null | undefined, email: string) {
   const parts = source.split(/[\s@._-]+/).filter(Boolean);
   return ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "")).toUpperCase() || "?";
 }
+
+/** Thousands separators for form inputs: "25000000" → "25,000,000". Leaves anything unparseable alone. */
+export function formatAmount(value: string) {
+  const cleaned = value.replace(/[₦$£€,\s]/g, "");
+  if (!/^\d+(\.\d{0,2})?$/.test(cleaned)) return value;
+  const [whole, decimals] = cleaned.split(".");
+  const grouped = whole.replace(/^0+(?=\d)/, "").replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return decimals === undefined ? grouped : `${grouped}.${decimals}`;
+}

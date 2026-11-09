@@ -1,5 +1,6 @@
 'use server';
 
+import { revalidatePath } from 'next/cache';
 import * as z from 'zod';
 import { assertAdmin, getCurrentUser, isAdmin } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db';
@@ -12,6 +13,7 @@ import {
   propertyObjectKey,
 } from '@/lib/storage/r2';
 import {
+  ArrangeDocumentsSchema,
   AttachDocumentsSchema,
   DOCUMENT_MIME_TYPES,
   MAX_DOCUMENT_BYTES,
@@ -60,7 +62,9 @@ export async function requestDocumentUploads(input: unknown): Promise<Result<{ k
 }
 
 /** Step 2: check each uploaded object, then record the documents. */
-export async function attachPropertyDocuments(input: unknown): Promise<Result<{ count: number }>> {
+export async function attachPropertyDocuments(
+  input: unknown,
+): Promise<Result<{ documents: { id: string; storageKey: string }[] }>> {
   const admin = await assertAdmin();
 
   if (!isStorageConfigured('documents')) return { ok: false, error: NOT_CONFIGURED };
@@ -102,7 +106,8 @@ export async function attachPropertyDocuments(input: unknown): Promise<Result<{ 
     return { ok: false, error: 'That property no longer exists.' };
   }
 
-  await prisma.propertyDocument.createMany({
+  const created = await prisma.propertyDocument.createManyAndReturn({
+    select: { id: true, storageKey: true },
     data: documents.map((doc, i) => ({
       propertyId,
       type: doc.type,
@@ -114,7 +119,50 @@ export async function attachPropertyDocuments(input: unknown): Promise<Result<{ 
       uploadedById: admin.id,
     })),
   });
-  return { ok: true, data: { count: documents.length } };
+  revalidatePath('/admin', 'layout');
+  return { ok: true, data: { documents: created } };
+}
+
+/**
+ * Edit form: saves each kept document's name, type and visibility, and deletes
+ * removed documents from the database and the private bucket.
+ */
+export async function arrangePropertyDocuments(input: unknown): Promise<Result<null>> {
+  await assertAdmin();
+
+  const parsed = ArrangeDocumentsSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: firstError(parsed.error) };
+  const { propertyId, documents, removedIds } = parsed.data;
+  const keepIds = documents.map((d) => d.id);
+  if (removedIds.some((id) => keepIds.includes(id))) {
+    return { ok: false, error: 'A document is marked both kept and removed.' };
+  }
+
+  const owned = await prisma.propertyDocument.findMany({
+    where: { propertyId, id: { in: [...keepIds, ...removedIds] } },
+    select: { id: true, storageKey: true },
+  });
+  if (owned.length !== keepIds.length + removedIds.length) {
+    return { ok: false, error: 'Some documents changed since this page loaded. Refresh the page and try again.' };
+  }
+
+  await prisma.$transaction([
+    prisma.propertyDocument.deleteMany({ where: { propertyId, id: { in: removedIds } } }),
+    ...documents.map((doc) =>
+      prisma.propertyDocument.update({
+        where: { id: doc.id },
+        data: { name: doc.name, type: doc.type, isPublic: doc.isPublic },
+      }),
+    ),
+  ]);
+
+  const removedKeys = owned.filter((d) => removedIds.includes(d.id)).map((d) => d.storageKey);
+  if (removedKeys.length > 0 && isStorageConfigured('documents')) {
+    await deleteObjects('documents', removedKeys).catch((error) => console.error('Document cleanup failed:', error));
+  }
+
+  revalidatePath('/admin', 'layout');
+  return { ok: true, data: null };
 }
 
 /**

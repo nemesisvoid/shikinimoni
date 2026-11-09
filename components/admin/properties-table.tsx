@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 import { Building2 } from "lucide-react";
 import { AvailabilityLabel, ListingStatusBadge } from "@/components/admin/badges";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -39,7 +40,12 @@ export function PropertiesTable({ rows, compact = false }: { rows: ListingRow[];
                     )}
                   </div>
                   <div className="min-w-0">
-                    <p className="max-w-[18rem] truncate font-medium">{p.name}</p>
+                    <Link
+                      href={`/admin/properties/${p.id}`}
+                      className="block max-w-[18rem] truncate font-medium underline-offset-4 hover:underline"
+                    >
+                      {p.name}
+                    </Link>
                     <p className="max-w-[18rem] truncate text-xs text-muted-foreground">
                       {[p.neighborhood, p.city, p.state].filter(Boolean).join(", ")}
                     </p>

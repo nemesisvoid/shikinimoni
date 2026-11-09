@@ -157,6 +157,40 @@ export const AttachDocumentsSchema = z.object({
     .max(MAX_DOCUMENTS_PER_PROPERTY, { error: `Upload ${MAX_DOCUMENTS_PER_PROPERTY} documents or fewer` }),
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Edit form: the final state of the saved photos/documents, applied in one go
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Every photo the property should keep, in display order (the first is the
+ * cover), plus the ones to delete. New uploads are attached first, so their ids
+ * are already in `photos`.
+ */
+export const ArrangePhotosSchema = z.object({
+  propertyId: uuid('property id'),
+  photos: z
+    .array(z.object({ id: uuid('photo id'), altText: optionalText(200) }))
+    .max(MAX_MEDIA_PER_PROPERTY, { error: `A property can have ${MAX_MEDIA_PER_PROPERTY} photos at most` })
+    .refine((list) => new Set(list.map((p) => p.id)).size === list.length, { error: 'Each photo can appear only once' }),
+  removedIds: z.array(uuid('photo id')).max(MAX_MEDIA_PER_PROPERTY),
+});
+
+/** Every document the property should keep, with its details, plus the ones to delete. */
+export const ArrangeDocumentsSchema = z.object({
+  propertyId: uuid('property id'),
+  documents: z
+    .array(
+      z.object({
+        id: uuid('document id'),
+        type: requiredEnum(DocumentType, 'a document type'),
+        name: requiredText('a document name', { max: 200 }),
+        isPublic: checkbox().default(false),
+      }),
+    )
+    .max(MAX_DOCUMENTS_PER_PROPERTY, { error: `A property can have ${MAX_DOCUMENTS_PER_PROPERTY} documents at most` }),
+  removedIds: z.array(uuid('document id')).max(MAX_DOCUMENTS_PER_PROPERTY),
+});
+
 export type PhotoFileInput = z.input<typeof photoFile>;
 export type AttachPhotosInput = z.input<typeof AttachPhotosSchema>;
 

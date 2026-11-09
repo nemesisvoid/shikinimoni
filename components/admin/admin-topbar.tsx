@@ -17,11 +17,12 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 
 export function AdminTopbar() {
   const pathname = usePathname();
-  // /admin/properties/new → [Properties, Add property]; unknown segments (ids) show as "Details".
+  // /admin/properties/new → [Properties, Add property]. An id under properties
+  // is the edit page; other unknown segments show as "Details".
   const segments = pathname.split("/").filter(Boolean).slice(1);
   const crumbs = segments.map((segment, i) => ({
     href: `/admin/${segments.slice(0, i + 1).join("/")}`,
-    label: ADMIN_SEGMENT_LABELS[segment] ?? "Details",
+    label: ADMIN_SEGMENT_LABELS[segment] ?? (segments[i - 1] === "properties" ? "Edit property" : "Details"),
   }));
 
   return (

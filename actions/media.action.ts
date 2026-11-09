@@ -1,5 +1,6 @@
 'use server';
 
+import { revalidatePath } from 'next/cache';
 import * as z from 'zod';
 import { assertAdmin } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db';
@@ -12,6 +13,7 @@ import {
   publicUrlFor,
 } from '@/lib/storage/r2';
 import {
+  ArrangePhotosSchema,
   AttachPhotosSchema,
   IMAGE_MIME_TYPES,
   MAX_IMAGE_BYTES,
@@ -60,7 +62,9 @@ export async function requestPhotoUploads(input: unknown): Promise<Result<{ key:
  * allowed type and size, then record them in display order. If the property
  * has no cover yet, the first photo becomes the cover.
  */
-export async function attachPropertyPhotos(input: unknown): Promise<Result<{ count: number }>> {
+export async function attachPropertyPhotos(
+  input: unknown,
+): Promise<Result<{ photos: { id: string; storageKey: string; url: string }[] }>> {
   const admin = await assertAdmin();
 
   if (!isStorageConfigured('media')) return { ok: false, error: NOT_CONFIGURED };
@@ -92,7 +96,7 @@ export async function attachPropertyPhotos(input: unknown): Promise<Result<{ cou
     return { ok: false, error: `${bad.length} photo${bad.length === 1 ? " didn't" : "s didn't"} upload correctly. Try again.` };
   }
 
-  const count = await prisma.$transaction(async (tx) => {
+  const created = await prisma.$transaction(async (tx) => {
     const property = await tx.property.findFirst({
       where: { id: propertyId, deletedAt: null },
       select: {
@@ -106,7 +110,8 @@ export async function attachPropertyPhotos(input: unknown): Promise<Result<{ cou
     const start = (last._max.sortOrder ?? -1) + 1;
     const needsCover = property.media.length === 0;
 
-    await tx.propertyMedia.createMany({
+    return tx.propertyMedia.createManyAndReturn({
+      select: { id: true, storageKey: true, url: true },
       data: photos.map((photo, i) => ({
         propertyId,
         type: 'IMAGE' as const,
@@ -123,14 +128,64 @@ export async function attachPropertyPhotos(input: unknown): Promise<Result<{ cou
         uploadedById: admin.id,
       })),
     });
-    return photos.length;
   });
 
-  if (count === null) {
+  if (created === null) {
     await deleteObjects('media', photos.map((p) => p.storageKey));
     return { ok: false, error: 'That property no longer exists.' };
   }
-  return { ok: true, data: { count } };
+  revalidatePath('/admin', 'layout');
+  return {
+    ok: true,
+    data: { photos: created.map((m) => ({ id: m.id, storageKey: m.storageKey!, url: m.url })) },
+  };
+}
+
+/**
+ * Edit form: applies the final photo list in one go. Sets display order (the
+ * first photo is the cover), updates alt text, and deletes removed photos from
+ * the database and from R2. Every id must belong to this property.
+ */
+export async function arrangePropertyPhotos(input: unknown): Promise<Result<null>> {
+  await assertAdmin();
+
+  const parsed = ArrangePhotosSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: firstError(parsed.error) };
+  const { propertyId, photos, removedIds } = parsed.data;
+  const keepIds = photos.map((p) => p.id);
+  if (removedIds.some((id) => keepIds.includes(id))) {
+    return { ok: false, error: 'A photo is marked both kept and removed.' };
+  }
+
+  const owned = await prisma.propertyMedia.findMany({
+    where: { propertyId, id: { in: [...keepIds, ...removedIds] } },
+    select: { id: true, storageKey: true },
+  });
+  if (owned.length !== keepIds.length + removedIds.length) {
+    return { ok: false, error: 'Some photos changed since this page loaded. Refresh the page and try again.' };
+  }
+
+  await prisma.$transaction([
+    prisma.propertyMedia.deleteMany({ where: { propertyId, id: { in: removedIds } } }),
+    // One cover at most: clear it everywhere first, then set it on the first photo.
+    prisma.propertyMedia.updateMany({ where: { propertyId, isCover: true }, data: { isCover: false } }),
+    ...photos.map((photo, i) =>
+      prisma.propertyMedia.update({
+        where: { id: photo.id },
+        data: { sortOrder: i, isCover: i === 0, altText: photo.altText ?? null },
+      }),
+    ),
+  ]);
+
+  // Delete files only after the rows are gone, so a failed transaction never
+  // leaves a row pointing at a missing file.
+  const removedKeys = owned.filter((m) => removedIds.includes(m.id) && m.storageKey).map((m) => m.storageKey!);
+  if (removedKeys.length > 0 && isStorageConfigured('media')) {
+    await deleteObjects('media', removedKeys).catch((error) => console.error('Photo cleanup failed:', error));
+  }
+
+  revalidatePath('/admin', 'layout');
+  return { ok: true, data: null };
 }
 
 function firstError(error: z.ZodError) {

@@ -3,7 +3,9 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { createProperty } from '@/actions/property.action';
+import { arrangePropertyDocuments } from '@/actions/document.action';
+import { arrangePropertyPhotos } from '@/actions/media.action';
+import { createProperty, updateProperty } from '@/actions/property.action';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Controller, FormProvider, useForm, useFormContext, useWatch, type FieldErrors, type Resolver } from 'react-hook-form';
 import { Building2, CircleAlert, CircleCheck, Factory, House, LandPlot, Loader2, Store, Tractor } from 'lucide-react';
@@ -47,7 +49,16 @@ import {
   type Choice,
 } from './form-fields';
 import { PhotoPicker } from './photo-picker';
-import { uploadPropertyDocuments, uploadPropertyPhotos, type StagedDocument, type StagedPhoto } from './upload-files';
+import {
+  uploadPropertyDocuments,
+  uploadPropertyPhotos,
+  type DocumentItem,
+  type PhotoItem,
+  type SavedDocument,
+  type SavedPhoto,
+  type StagedDocument,
+  type StagedPhoto,
+} from './upload-files';
 import { DocumentPicker } from './document-picker';
 import { BUILDING_FIELDS, EMPTY_PROPERTY, FORM_SECTIONS, toSchemaInput, type PropertyFormValues } from './values';
 
@@ -74,6 +85,11 @@ const STATUS_CHOICES: Choice[] = [
   { value: 'DRAFT', label: 'Draft', hint: 'Only admins can see it' },
   { value: 'PUBLISHED', label: 'Published', hint: 'Live on the site once saved' },
 ];
+/** Editing adds Archived: off the site but kept for records, e.g. a sold property. */
+const EDIT_STATUS_CHOICES: Choice[] = [
+  ...STATUS_CHOICES,
+  { value: 'ARCHIVED', label: 'Archived', hint: 'Off the site, kept for records' },
+];
 const CURRENCY_OPTIONS = Object.fromEntries(Object.entries(CURRENCIES).map(([code, c]) => [code, c.label]));
 const STATE_OPTIONS = Object.fromEntries(NIGERIAN_STATES.map(s => [s, s]));
 const sqmFormatter = new Intl.NumberFormat('en-NG', { maximumFractionDigits: 2 });
@@ -87,42 +103,72 @@ const schemaResolver = zodResolver(CreatePropertySchema);
 const resolver: Resolver<PropertyFormValues, unknown, CreatePropertyInput> = (values, context, options) =>
   schemaResolver(toSchemaInput(values), context, options as never) as ReturnType<Resolver<PropertyFormValues, unknown, CreatePropertyInput>>;
 
-export function PropertyForm({ amenities }: { amenities: AmenityOption[] }) {
+export type ExistingProperty = {
+  id: string;
+  values: PropertyFormValues;
+  photos: SavedPhoto[];
+  documents: SavedDocument[];
+};
+
+/**
+ * Create and edit form. Without `property` it creates a listing; with it, it
+ * edits that listing, including its saved photos and documents.
+ */
+export function PropertyForm({ amenities, property }: { amenities: AmenityOption[]; property?: ExistingProperty }) {
+  const isEditing = property !== undefined;
   const form = useForm<PropertyFormValues, unknown, CreatePropertyInput>({
     resolver,
-    defaultValues: EMPTY_PROPERTY,
+    defaultValues: property?.values ?? EMPTY_PROPERTY,
     mode: 'onTouched',
   });
-  const { control, setValue, getValues, setError, handleSubmit, formState } = form;
+  const { control, setValue, getValues, setError, handleSubmit, reset, formState } = form;
   const router = useRouter();
   const [category, listingType, pricePeriod, currency, country, name, status, landSize, landSizeUnit, landAreaSqm, summary] = useWatch({
     control,
     name: ['category', 'listingType', 'pricePeriod', 'currency', 'country', 'name', 'status', 'landSize', 'landSizeUnit', 'landAreaSqm', 'summary'],
   });
-  // Files live outside react-hook-form: they're not part of the property schema.
-  const [photos, setPhotos] = useState<StagedPhoto[]>([]);
-  const [documents, setDocuments] = useState<StagedDocument[]>([]);
 
-  // Saving happens in steps: create the property, then upload photos, then
-  // documents. If an upload fails, the property is already saved, so a retry
-  // only re-sends the files that didn't make it.
+  // Files live outside react-hook-form: they're not part of the property schema.
+  // Saved and new files share one list each, so order and cover work across both.
+  const [photos, setPhotos] = useState<PhotoItem[]>(property?.photos ?? []);
+  const [documents, setDocuments] = useState<DocumentItem[]>(property?.documents ?? []);
+  const [filesDirty, setFilesDirty] = useState(false);
+  // What the server holds right now, to work out which saved files were removed.
+  const [storedPhotoIds, setStoredPhotoIds] = useState(() => property?.photos.map(p => p.id) ?? []);
+  const [storedDocumentIds, setStoredDocumentIds] = useState(() => property?.documents.map(d => d.id) ?? []);
+
+  const changePhotos = (next: PhotoItem[]) => {
+    setPhotos(next);
+    setFilesDirty(true);
+  };
+  const changeDocuments = (next: DocumentItem[]) => {
+    setDocuments(next);
+    setFilesDirty(true);
+  };
+
+  // Saving happens in steps: save the details (create or update), upload new
+  // photos and documents, then apply order/cover/removals to the saved ones.
+  // Once the property exists, a retry updates it instead of creating another,
+  // and files that already uploaded are never sent twice.
   const [stage, setStage] = useState<'idle' | 'saving' | 'uploading' | 'done'>('idle');
   const [progress, setProgress] = useState(0);
-  const [saved, setSaved] = useState<{ id: string; slug: string } | null>(null);
-  const [uploaded, setUploaded] = useState({ photos: false, documents: false });
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [propertyId, setPropertyId] = useState<string | null>(property?.id ?? null);
+  // `filesOnly`: the details saved but some files didn't, so say so.
+  const [submitError, setSubmitError] = useState<{ message: string; filesOnly: boolean } | null>(null);
+  const [savedNotice, setSavedNotice] = useState(false);
 
   const isLand = category === 'LAND';
   const isSale = listingType === 'SALE';
   const currencySymbol = CURRENCIES[currency as keyof typeof CURRENCIES]?.symbol ?? currency;
+  const hasUnsavedChanges = formState.isDirty || filesDirty;
 
   // Warn before leaving with unsaved changes.
   useEffect(() => {
-    if ((!formState.isDirty && photos.length === 0 && documents.length === 0) || stage === 'done') return;
+    if (!hasUnsavedChanges || stage === 'done') return;
     const onBeforeUnload = (e: BeforeUnloadEvent) => e.preventDefault();
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [formState.isDirty, photos.length, documents.length, stage]);
+  }, [hasUnsavedChanges, stage]);
 
   // ── Dependent fields ─────────────────────────────────────────────────────
   const onCategoryChange = (next: string) => {
@@ -156,66 +202,118 @@ export function PropertyForm({ amenities }: { amenities: AmenityOption[] }) {
   // ── Submit ───────────────────────────────────────────────────────────────
   const onValid = async () => {
     setSubmitError(null);
-
-    // 1. Create the property (skipped on a retry: it already exists).
-    let property = saved;
-    if (!property) {
-      setStage('saving');
-      try {
-        // Send the raw values: the server validates them with the same schema.
-        const result = await createProperty(toSchemaInput(getValues()));
-        if (!result.ok) {
-          setStage('idle');
-          if (!showServerErrors(result.fieldErrors)) setSubmitError(result.error);
-          return;
-        }
-        property = result.data;
-        setSaved(property);
-      } catch {
-        setStage('idle');
-        setSubmitError("The property couldn't be saved. Check your connection and try again. If it keeps failing, sign in again.");
-        return;
-      }
-    }
-
-    // 2. Upload whatever hasn't been uploaded yet, with one combined progress bar.
-    const propertyId = property.id;
-    const photoBytes = uploaded.photos ? 0 : sumBytes(photos);
-    const documentBytes = uploaded.documents ? 0 : sumBytes(documents);
-    const totalBytes = Math.max(1, photoBytes + documentBytes);
-    setStage('uploading');
-    setProgress(0);
-
-    const problems: string[] = [];
-    let photosDone = uploaded.photos;
-    let documentsDone = uploaded.documents;
-
-    if (!photosDone) {
-      const result = await safeUpload(() =>
-        uploadPropertyPhotos(propertyId, photos, f => setProgress((f * photoBytes) / totalBytes)),
-      );
-      if (result.ok) photosDone = true;
-      else problems.push(`Photos: ${result.error}`);
-    }
-    if (!documentsDone) {
-      const result = await safeUpload(() =>
-        uploadPropertyDocuments(propertyId, documents, f => setProgress((photoBytes + f * documentBytes) / totalBytes)),
-      );
-      if (result.ok) documentsDone = true;
-      else problems.push(`Documents: ${result.error}`);
-    }
-    setUploaded({ photos: photosDone, documents: documentsDone });
-
-    if (problems.length > 0) {
-      setStage('idle');
-      setSubmitError(problems.join(' '));
+    setSavedNotice(false);
+    if (documents.some(d => d.name.trim() === '')) {
+      setSubmitError({ message: 'Give every document a name.', filesOnly: false });
+      document.getElementById('documents')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       return;
     }
 
-    // 3. All done.
+    // 1. Save the details.
+    const existed = propertyId !== null;
+    let id: string;
+    setStage('saving');
+    try {
+      // Send the raw values: the server validates them with the same schema.
+      const values = toSchemaInput(getValues());
+      const result = propertyId ? await updateProperty({ id: propertyId, values }) : await createProperty(values);
+      if (!result.ok) {
+        setStage('idle');
+        if (!showServerErrors(result.fieldErrors)) setSubmitError({ message: result.error, filesOnly: false });
+        return;
+      }
+      id = result.data.id;
+      setPropertyId(id);
+      // A cleared web address is regenerated on the server; show the real one.
+      if (getValues('slug') !== result.data.slug) setValue('slug', result.data.slug);
+    } catch {
+      setStage('idle');
+      setSubmitError({
+        message: "The property couldn't be saved. Check your connection and try again. If it keeps failing, sign in again.",
+        filesOnly: false,
+      });
+      return;
+    }
+
+    // 2. Upload new files, with one combined progress bar.
+    const problems: string[] = [];
+    let currentPhotos = photos;
+    let currentDocuments = documents;
+    const newPhotos = photos.filter((p): p is StagedPhoto => p.kind === 'new');
+    const newDocuments = documents.filter((d): d is StagedDocument => d.kind === 'new');
+    const photoBytes = sumBytes(newPhotos);
+    const totalBytes = Math.max(1, photoBytes + sumBytes(newDocuments));
+
+    if (newPhotos.length + newDocuments.length > 0) {
+      setStage('uploading');
+      setProgress(0);
+    }
+    if (newPhotos.length > 0) {
+      const result = await safeUpload(() => uploadPropertyPhotos(id, newPhotos, f => setProgress((f * photoBytes) / totalBytes)));
+      if (result.ok) {
+        currentPhotos = currentPhotos.map(p => result.data.get(p.id) ?? p);
+        setPhotos(currentPhotos);
+      } else problems.push(`Photos: ${result.error}`);
+    }
+    if (newDocuments.length > 0) {
+      const documentBytes = totalBytes - photoBytes;
+      const result = await safeUpload(() =>
+        uploadPropertyDocuments(id, newDocuments, f => setProgress((photoBytes + f * documentBytes) / totalBytes)),
+      );
+      if (result.ok) {
+        currentDocuments = currentDocuments.map(d => result.data.get(d.id) ?? d);
+        setDocuments(currentDocuments);
+      } else problems.push(`Documents: ${result.error}`);
+    }
+
+    // 3. Editing: apply order, cover, alt text, document details and removals.
+    if (existed) {
+      const savedPhotos = currentPhotos.filter((p): p is SavedPhoto => p.kind === 'saved');
+      const photoResult = await safeUpload(() =>
+        arrangePropertyPhotos({
+          propertyId: id,
+          photos: savedPhotos.map(p => ({ id: p.id, altText: p.altText })),
+          removedIds: storedPhotoIds.filter(storedId => !savedPhotos.some(p => p.id === storedId)),
+        }),
+      );
+      if (photoResult.ok) setStoredPhotoIds(savedPhotos.map(p => p.id));
+      else problems.push(`Photos: ${photoResult.error}`);
+
+      const savedDocuments = currentDocuments.filter((d): d is SavedDocument => d.kind === 'saved');
+      const documentResult = await safeUpload(() =>
+        arrangePropertyDocuments({
+          propertyId: id,
+          documents: savedDocuments.map(d => ({ id: d.id, name: d.name, type: d.type, isPublic: d.isPublic })),
+          removedIds: storedDocumentIds.filter(storedId => !savedDocuments.some(d => d.id === storedId)),
+        }),
+      );
+      if (documentResult.ok) setStoredDocumentIds(savedDocuments.map(d => d.id));
+      else problems.push(`Documents: ${documentResult.error}`);
+    } else {
+      setStoredPhotoIds(currentPhotos.filter(p => p.kind === 'saved').map(p => p.id));
+      setStoredDocumentIds(currentDocuments.filter(d => d.kind === 'saved').map(d => d.id));
+    }
+
+    // The details are saved either way, so they no longer count as unsaved.
+    reset(getValues());
+
+    if (problems.length > 0) {
+      setStage('idle');
+      setSubmitError({ message: problems.join(' '), filesOnly: true });
+      return;
+    }
+    setFilesDirty(false);
     setProgress(1);
-    setStage('done');
-    router.push('/admin/properties');
+
+    // 4. New listing → the property list. Edit → stay here with a notice.
+    if (!isEditing) {
+      setStage('done');
+      router.push('/admin/properties');
+    } else {
+      setStage('idle');
+      setSavedNotice(true);
+      router.refresh();
+    }
   };
 
   /** Puts server-side field errors on their fields. Returns false if none matched a field. */
@@ -227,9 +325,13 @@ export function PropertyForm({ amenities }: { amenities: AmenityOption[] }) {
     return entries.length > 0;
   };
 
-  const onInvalid = () => setSubmitError(null);
+  const onInvalid = () => {
+    setSubmitError(null);
+    setSavedNotice(false);
+  };
 
   const isBusy = formState.isSubmitting || stage === 'done';
+  const createdButIncomplete = !isEditing && propertyId !== null;
   const submitLabel =
     stage === 'saving'
       ? 'Saving…'
@@ -237,11 +339,13 @@ export function PropertyForm({ amenities }: { amenities: AmenityOption[] }) {
         ? `Uploading files… ${Math.round(progress * 100)}%`
         : stage === 'done'
           ? 'Saved'
-          : saved
+          : createdButIncomplete
             ? 'Retry upload'
-            : status === 'PUBLISHED'
-              ? 'Publish property'
-              : 'Save draft';
+            : isEditing
+              ? 'Save changes'
+              : status === 'PUBLISHED'
+                ? 'Publish property'
+                : 'Save draft';
 
   const errorCount = countErrors(formState.errors);
   const sectionHasError = (fields: readonly string[]) => fields.some(f => f in formState.errors);
@@ -317,8 +421,8 @@ export function PropertyForm({ amenities }: { amenities: AmenityOption[] }) {
             description='The first photo is the cover on listing cards. Photos upload when you save.'>
             <PhotoPicker
               photos={photos}
-              onChange={setPhotos}
-              disabled={isBusy || uploaded.photos}
+              onChange={changePhotos}
+              disabled={isBusy}
             />
           </FormSection>
 
@@ -379,8 +483,8 @@ export function PropertyForm({ amenities }: { amenities: AmenityOption[] }) {
             description='Optional. Title documents, survey plans and other papers, kept private unless you choose to show them to buyers.'>
             <DocumentPicker
               documents={documents}
-              onChange={setDocuments}
-              disabled={isBusy || uploaded.documents}
+              onChange={changeDocuments}
+              disabled={isBusy}
             />
           </FormSection>
 
@@ -647,7 +751,7 @@ export function PropertyForm({ amenities }: { amenities: AmenityOption[] }) {
             <ChoiceField
               name='status'
               legend='Visibility'
-              choices={STATUS_CHOICES}
+              choices={isEditing ? EDIT_STATUS_CHOICES : STATUS_CHOICES}
               className='grid-cols-1'
             />
             <SelectField
@@ -681,9 +785,13 @@ export function PropertyForm({ amenities }: { amenities: AmenityOption[] }) {
                   className='mt-0.5 size-4 shrink-0'
                 />
                 <div className='flex flex-col gap-1'>
-                  {saved && <p className='font-medium'>The property is saved, but some files didn&apos;t upload.</p>}
-                  <p>{submitError}</p>
-                  {saved && <p>Retry uploads only the files; changes to the details above won&apos;t be saved.</p>}
+                  {submitError.filesOnly && (
+                    <p className='font-medium'>
+                      {isEditing ? 'Your changes are saved' : 'The property is saved'}, but some files didn&apos;t save.
+                    </p>
+                  )}
+                  <p>{submitError.message}</p>
+                  {submitError.filesOnly && <p>Files that already saved won&apos;t be sent again.</p>}
                 </div>
               </div>
             )}
@@ -702,6 +810,17 @@ export function PropertyForm({ amenities }: { amenities: AmenityOption[] }) {
                   />
                 </div>
                 <p className='text-sm text-muted-foreground'>Keep this page open until the upload finishes.</p>
+              </div>
+            )}
+            {savedNotice && !hasUnsavedChanges && stage === 'idle' && (
+              <div
+                role='status'
+                className='flex gap-2 rounded-xl bg-verified p-3 text-sm text-verified-foreground'>
+                <CircleCheck
+                  aria-hidden
+                  className='mt-0.5 size-4 shrink-0'
+                />
+                <span>Changes saved.</span>
               </div>
             )}
             {stage === 'done' && (
@@ -730,7 +849,7 @@ export function PropertyForm({ amenities }: { amenities: AmenityOption[] }) {
                 aria-disabled={isBusy}
                 tabIndex={isBusy ? -1 : undefined}
                 className={cn(buttonVariants({ variant: 'ghost', size: 'lg' }), isBusy && 'pointer-events-none opacity-50')}>
-                {saved ? 'Continue without the files' : 'Cancel'}
+                {createdButIncomplete ? 'Continue without the files' : isEditing ? 'Back to properties' : 'Cancel'}
               </Link>
             </div>
           </FormSection>
@@ -850,7 +969,7 @@ function countErrors(errors: FieldErrors<PropertyFormValues>) {
 const sumBytes = (items: { file: File }[]) => items.reduce((sum, item) => sum + item.file.size, 0);
 
 /** Upload helpers call server actions, which throw on a dropped connection or an expired session. */
-async function safeUpload(run: () => Promise<{ ok: true } | { ok: false; error: string }>) {
+async function safeUpload<T>(run: () => Promise<{ ok: true; data: T } | { ok: false; error: string }>) {
   try {
     return await run();
   } catch {

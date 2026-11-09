@@ -1,7 +1,8 @@
 "use client";
 
 import { useId, useState, type DragEvent } from "react";
-import { FileText, FileUp, Image as ImageIcon, X } from "lucide-react";
+import { ExternalLink, FileText, FileUp, Image as ImageIcon, X } from "lucide-react";
+import { getDocumentLink } from "@/actions/document.action";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -10,23 +11,24 @@ import { DOCUMENT_TYPE_LABEL } from "@/lib/admin/property-options";
 import type { DocumentType } from "@/lib/generated/prisma/enums";
 import { cn } from "@/lib/utils";
 import { DOCUMENT_MIME_TYPES, MAX_DOCUMENT_BYTES, MAX_DOCUMENTS_PER_PROPERTY } from "@/schemas/media.schema";
-import type { StagedDocument } from "./upload-files";
+import type { DocumentItem, StagedDocument } from "./upload-files";
 
 const MAX_MB = MAX_DOCUMENT_BYTES / 1024 / 1024;
 const ACCEPT = DOCUMENT_MIME_TYPES.join(",");
 
 /**
  * Title documents, survey plans and the like. They're stored privately: only
- * admins can open them unless "Show to buyers" is on. Nothing uploads until the
- * property is saved.
+ * admins can open them unless "Show to buyers" is on. On the edit page, saved
+ * documents sit in the same list as new ones; nothing changes in storage until
+ * the property is saved.
  */
 export function DocumentPicker({
   documents,
   onChange,
   disabled,
 }: {
-  documents: StagedDocument[];
-  onChange: (documents: StagedDocument[]) => void;
+  documents: DocumentItem[];
+  onChange: (documents: DocumentItem[]) => void;
   disabled?: boolean;
 }) {
   const inputId = useId();
@@ -46,6 +48,7 @@ export function DocumentPicker({
         problems.push(`${file.name}: a property can have ${MAX_DOCUMENTS_PER_PROPERTY} documents at most.`);
       } else {
         accepted.push({
+          kind: "new",
           id: crypto.randomUUID(),
           file,
           name: nameFromFile(file.name),
@@ -58,7 +61,7 @@ export function DocumentPicker({
     if (accepted.length) onChange([...documents, ...accepted]);
   }
 
-  const update = (id: string, patch: Partial<StagedDocument>) =>
+  const update = (id: string, patch: Partial<Pick<DocumentItem, "name" | "type" | "isPublic">>) =>
     onChange(documents.map((d) => (d.id === id ? { ...d, ...patch } : d)));
 
   const onDrop = (e: DragEvent) => {
@@ -72,7 +75,10 @@ export function DocumentPicker({
       {documents.length > 0 && (
         <ul className="flex flex-col divide-y rounded-2xl border">
           {documents.map((doc, index) => {
-            const isImage = doc.file.type.startsWith("image/");
+            const mimeType = doc.kind === "new" ? doc.file.type : (doc.mimeType ?? "");
+            const sizeBytes = doc.kind === "new" ? doc.file.size : doc.sizeBytes;
+            const title = doc.kind === "new" ? doc.file.name : doc.name || "Untitled document";
+            const isImage = mimeType.startsWith("image/");
             const nameId = `${inputId}-name-${doc.id}`;
             const typeId = `${inputId}-type-${doc.id}`;
             const publicId = `${inputId}-public-${doc.id}`;
@@ -83,18 +89,21 @@ export function DocumentPicker({
                     {isImage ? <ImageIcon className="size-5" /> : <FileText className="size-5" />}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{doc.file.name}</p>
+                    <p className="truncate text-sm font-medium">{title}</p>
                     <p className="text-xs text-muted-foreground">
-                      {isImage ? "Image scan" : "PDF"}, {formatBytes(doc.file.size)}
+                      {isImage ? "Image scan" : "PDF"}
+                      {sizeBytes ? `, ${formatBytes(sizeBytes)}` : ""}
+                      {doc.kind === "new" && documents.some((d) => d.kind === "saved") ? ", uploads when you save" : ""}
                     </p>
                   </div>
+                  {doc.kind === "saved" && <ViewButton documentId={doc.id} name={title} disabled={disabled} />}
                   <Button
                     type="button"
                     variant="ghost"
                     size="icon-sm"
                     onClick={() => onChange(documents.filter((d) => d.id !== doc.id))}
                     disabled={disabled}
-                    aria-label={`Remove ${doc.file.name}`}
+                    aria-label={`Remove ${title}`}
                   >
                     <X />
                   </Button>
@@ -204,6 +213,48 @@ export function DocumentPicker({
             <li key={message}>{message}</li>
           ))}
         </ul>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Opens a saved document through a 5-minute signed link. The tab opens before
+ * the request so popup blockers allow it, then navigates once the link arrives.
+ */
+function ViewButton({ documentId, name, disabled }: { documentId: string; name: string; disabled?: boolean }) {
+  const [error, setError] = useState<string | null>(null);
+  const [opening, setOpening] = useState(false);
+
+  async function open() {
+    setError(null);
+    setOpening(true);
+    const tab = window.open("about:blank", "_blank");
+    try {
+      const result = await getDocumentLink({ id: documentId });
+      if (result.ok && tab) tab.location.href = result.data.url;
+      else {
+        tab?.close();
+        setError(result.ok ? "Allow pop-ups to open documents." : result.error);
+      }
+    } catch {
+      tab?.close();
+      setError("Couldn't open the document. Try again.");
+    } finally {
+      setOpening(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <Button type="button" variant="outline" size="sm" onClick={open} disabled={disabled || opening} aria-label={`View ${name}`}>
+        <ExternalLink aria-hidden />
+        View
+      </Button>
+      {error && (
+        <p role="alert" className="max-w-48 text-right text-xs text-destructive">
+          {error}
+        </p>
       )}
     </div>
   );

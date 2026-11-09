@@ -1,6 +1,8 @@
 import "server-only";
 import { prisma } from "@/lib/db";
+import type { Prisma } from "@/lib/generated/prisma/client";
 import type { Availability, ListingStatus } from "@/lib/generated/prisma/enums";
+import type { PropertyFilters, PropertySort } from "@/schemas/property.schema";
 
 /**
  * Admin read queries. Callers must have checked admin access already
@@ -77,8 +79,82 @@ export async function getDashboardData() {
   };
 }
 
-export function listAdminProperties() {
-  return prisma.property.findMany({ where: live, orderBy: { updatedAt: "desc" }, take: 100, select: listingRowSelect });
+const SORT_ORDER: Record<PropertySort, Prisma.PropertyOrderByWithRelationInput[]> = {
+  newest: [{ createdAt: "desc" }],
+  oldest: [{ createdAt: "asc" }],
+  updated: [{ updatedAt: "desc" }],
+  updated_asc: [{ updatedAt: "asc" }],
+  // "Price on request" (null) sorts last either way.
+  price_asc: [{ price: { sort: "asc", nulls: "last" } }],
+  price_desc: [{ price: { sort: "desc", nulls: "last" } }],
+  name_asc: [{ name: "asc" }],
+  name_desc: [{ name: "desc" }],
+};
+
+/**
+ * One page of the admin properties table. Search matches the name, area, city,
+ * state or web address, and a reference like "PRP-00012" or "12". A page past
+ * the end falls back to the last page.
+ */
+export async function listAdminPropertiesPage(filters: PropertyFilters) {
+  const q = filters.q?.trim();
+  const refMatch = q?.match(/^(?:prp-?)?0*(\d{1,9})$/i);
+  const where: Prisma.PropertyWhereInput = {
+    ...(filters.includeDeleted ? {} : live),
+    status: filters.status,
+    listingType: filters.listingType,
+    category: filters.category,
+    type: filters.type,
+    availability: filters.availability,
+    ...(filters.featured !== undefined ? { isFeatured: filters.featured } : {}),
+    ...(q
+      ? {
+          OR: [
+            { name: { contains: q, mode: "insensitive" } },
+            { neighborhood: { contains: q, mode: "insensitive" } },
+            { city: { contains: q, mode: "insensitive" } },
+            { state: { contains: q, mode: "insensitive" } },
+            { slug: { contains: q, mode: "insensitive" } },
+            ...(refMatch ? [{ refNumber: Number(refMatch[1]) }] : []),
+          ],
+        }
+      : {}),
+  };
+
+  const total = await prisma.property.count({ where });
+  const pageCount = Math.max(1, Math.ceil(total / filters.pageSize));
+  const page = Math.min(filters.page, pageCount);
+  const rows = await prisma.property.findMany({
+    where,
+    orderBy: [...SORT_ORDER[filters.sort], { id: "desc" }], // id breaks ties so pages never overlap
+    skip: (page - 1) * filters.pageSize,
+    take: filters.pageSize,
+    select: { ...listingRowSelect, category: true, isFeatured: true },
+  });
+  return { rows, total, page, pageCount };
+}
+
+/** Everything the edit form needs. Null for a missing or deleted property. */
+export async function getPropertyForEdit(id: string) {
+  const property = await prisma.property.findFirst({
+    where: { id, ...live },
+    include: {
+      amenities: { select: { amenityId: true } },
+      media: {
+        where: { type: "IMAGE" },
+        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+        select: { id: true, url: true, altText: true, isCover: true },
+      },
+      documents: {
+        orderBy: { createdAt: "asc" },
+        select: { id: true, name: true, type: true, isPublic: true, mimeType: true, sizeBytes: true },
+      },
+    },
+  });
+  if (!property) return null;
+  // The form treats the first photo as the cover, so make sure it is first.
+  const media = [...property.media].sort((a, b) => Number(b.isCover) - Number(a.isCover));
+  return { ...property, media };
 }
 
 export function listInquiries() {
@@ -96,5 +172,5 @@ export function countNewInquiries() {
   return prisma.inquiry.count({ where: { status: "NEW" } });
 }
 
-export type ListingRow = Awaited<ReturnType<typeof listAdminProperties>>[number];
+export type ListingRow = Prisma.PropertyGetPayload<{ select: typeof listingRowSelect }>;
 export type InquiryRow = Awaited<ReturnType<typeof listInquiries>>[number];
