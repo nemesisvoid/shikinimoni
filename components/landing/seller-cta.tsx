@@ -1,5 +1,5 @@
 import { Roofline } from "@/components/landing/roofline";
-import { siteConfig } from "@/lib/site";
+import Link from "next/link";
 
 export function SellerCta() {
   return (
@@ -14,12 +14,12 @@ export function SellerCta() {
             List it with ShikiniMoni. We photograph it, check the papers, and arrange inspections with serious
             buyers.
           </p>
-          <a
-            href={`mailto:${siteConfig.contactEmail}?subject=${encodeURIComponent("I want to list a property")}`}
+          <Link
+            href="/contact?topic=selling"
             className="mt-8 inline-flex h-12 items-center rounded-full bg-highlight px-6 font-semibold text-highlight-foreground transition-[filter] duration-200 hover:brightness-105 focus-visible:ring-3 focus-visible:ring-white/60 focus-visible:outline-none"
           >
             Talk to our team
-          </a>
+          </Link>
         </div>
       </div>
     </section>

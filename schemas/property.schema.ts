@@ -283,7 +283,18 @@ export const BulkPropertyActionSchema = z.object({
 // default, so a hand-edited URL can't crash the page.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const PROPERTY_SORTS = ['newest', 'oldest', 'price_asc', 'price_desc', 'updated'] as const;
+/** `updated` = most recently updated first; the `_asc` variants and `name_*` are for the admin table. */
+export const PROPERTY_SORTS = [
+  'newest',
+  'oldest',
+  'price_asc',
+  'price_desc',
+  'updated',
+  'updated_asc',
+  'name_asc',
+  'name_desc',
+] as const;
+export type PropertySort = (typeof PROPERTY_SORTS)[number];
 
 const param = <T extends z.ZodType>(schema: T) => z.preprocess(firstParam, schema.optional()).catch(undefined);
 

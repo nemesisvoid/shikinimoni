@@ -1,5 +1,6 @@
 import type {
   Availability,
+  DocumentType,
   Furnishing,
   ListingType,
   PricePeriod,
@@ -108,3 +109,12 @@ export const TITLE_SUGGESTIONS = [
   "Right of Occupancy (R of O)",
   "Deed of Sublease",
 ] as const;
+
+export const DOCUMENT_TYPE_LABEL: Record<DocumentType, string> = {
+  TITLE_DOCUMENT: "Title document (C of O, Consent…)",
+  SURVEY_PLAN: "Survey plan",
+  DEED: "Deed of assignment",
+  BUILDING_APPROVAL: "Building approval",
+  RECEIPT: "Receipt",
+  OTHER: "Other",
+};

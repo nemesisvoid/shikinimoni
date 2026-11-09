@@ -87,6 +87,113 @@ export const SetCoverImageSchema = z.object({
 
 export const MediaIdSchema = z.object({ id: uuid('media id') });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Photo batches (the property form uploads several photos at once)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const photoFile = RequestImageUploadSchema.omit({ propertyId: true });
+
+/** Step 1 for a batch: one signed upload URL per photo. */
+export const RequestPhotoUploadsSchema = z.object({
+  propertyId: uuid('property id'),
+  files: z
+    .array(photoFile, { error: 'Choose at least one photo' })
+    .min(1, { error: 'Choose at least one photo' })
+    .max(MAX_MEDIA_PER_PROPERTY, { error: `Upload ${MAX_MEDIA_PER_PROPERTY} photos or fewer` }),
+});
+
+/**
+ * Step 2 for a batch: record the uploaded photos, in display order. The URL is
+ * built on the server from the key, never taken from the browser.
+ */
+export const AttachPhotosSchema = z.object({
+  propertyId: uuid('property id'),
+  photos: z
+    .array(
+      z.object({
+        storageKey: z.string().min(1).max(512),
+        altText: optionalText(200),
+        caption: optionalText(300),
+        width: optionalCount(20_000),
+        height: optionalCount(20_000),
+      }),
+    )
+    .min(1, { error: 'There are no photos to save' })
+    .max(MAX_MEDIA_PER_PROPERTY, { error: `Upload ${MAX_MEDIA_PER_PROPERTY} photos or fewer` }),
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Document batches (title documents, survey plans…). Stored in the PRIVATE bucket.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const MAX_DOCUMENTS_PER_PROPERTY = 20;
+
+const documentFile = RequestDocumentUploadSchema.pick({ contentType: true, sizeBytes: true }).extend({
+  fileName: requiredText('a file name', { max: 255 }),
+});
+
+/** Step 1 for a batch: one signed upload URL per document. */
+export const RequestDocumentUploadsSchema = z.object({
+  propertyId: uuid('property id'),
+  files: z
+    .array(documentFile, { error: 'Choose at least one document' })
+    .min(1, { error: 'Choose at least one document' })
+    .max(MAX_DOCUMENTS_PER_PROPERTY, { error: `Upload ${MAX_DOCUMENTS_PER_PROPERTY} documents or fewer` }),
+});
+
+/** Step 2 for a batch: record the uploaded documents with their details. */
+export const AttachDocumentsSchema = z.object({
+  propertyId: uuid('property id'),
+  documents: z
+    .array(
+      z.object({
+        storageKey: z.string().min(1).max(512),
+        type: requiredEnum(DocumentType, 'a document type'),
+        name: requiredText('a document name', { max: 200 }),
+        isPublic: checkbox().default(false),
+      }),
+    )
+    .min(1, { error: 'There are no documents to save' })
+    .max(MAX_DOCUMENTS_PER_PROPERTY, { error: `Upload ${MAX_DOCUMENTS_PER_PROPERTY} documents or fewer` }),
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Edit form: the final state of the saved photos/documents, applied in one go
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Every photo the property should keep, in display order (the first is the
+ * cover), plus the ones to delete. New uploads are attached first, so their ids
+ * are already in `photos`.
+ */
+export const ArrangePhotosSchema = z.object({
+  propertyId: uuid('property id'),
+  photos: z
+    .array(z.object({ id: uuid('photo id'), altText: optionalText(200) }))
+    .max(MAX_MEDIA_PER_PROPERTY, { error: `A property can have ${MAX_MEDIA_PER_PROPERTY} photos at most` })
+    .refine((list) => new Set(list.map((p) => p.id)).size === list.length, { error: 'Each photo can appear only once' }),
+  removedIds: z.array(uuid('photo id')).max(MAX_MEDIA_PER_PROPERTY),
+});
+
+/** Every document the property should keep, with its details, plus the ones to delete. */
+export const ArrangeDocumentsSchema = z.object({
+  propertyId: uuid('property id'),
+  documents: z
+    .array(
+      z.object({
+        id: uuid('document id'),
+        type: requiredEnum(DocumentType, 'a document type'),
+        name: requiredText('a document name', { max: 200 }),
+        isPublic: checkbox().default(false),
+      }),
+    )
+    .max(MAX_DOCUMENTS_PER_PROPERTY, { error: `A property can have ${MAX_DOCUMENTS_PER_PROPERTY} documents at most` }),
+  removedIds: z.array(uuid('document id')).max(MAX_DOCUMENTS_PER_PROPERTY),
+});
+
+export type PhotoFileInput = z.input<typeof photoFile>;
+export type AttachPhotosInput = z.input<typeof AttachPhotosSchema>;
+
 export type RequestImageUploadInput = z.output<typeof RequestImageUploadSchema>;
 export type RequestDocumentUploadInput = z.output<typeof RequestDocumentUploadSchema>;
 export type CreatePropertyMediaInput = z.output<typeof CreatePropertyMediaSchema>;

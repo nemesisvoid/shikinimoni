@@ -323,11 +323,4 @@ export function FormSection({
   );
 }
 
-/** Thousands separators on blur: "25000000" → "25,000,000". Leaves anything unparseable alone. */
-export function formatAmount(value: string) {
-  const cleaned = value.replace(/[₦$£€,\s]/g, "");
-  if (!/^\d+(\.\d{0,2})?$/.test(cleaned)) return value;
-  const [whole, decimals] = cleaned.split(".");
-  const grouped = whole.replace(/^0+(?=\d)/, "").replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return decimals === undefined ? grouped : `${grouped}.${decimals}`;
-}
+export { formatAmount } from "@/lib/format";

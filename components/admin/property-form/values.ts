@@ -1,12 +1,16 @@
+import type { Property } from "@/lib/generated/prisma/client";
 import type {
   Availability,
   Furnishing,
+  ListingStatus,
   ListingType,
   PricePeriod,
   PropertyCategory,
   PropertyType,
   SizeUnit,
 } from "@/lib/generated/prisma/enums";
+import { formatAmount } from "@/lib/format";
+import { SQM_PER_UNIT } from "@/schemas/property.schema";
 
 /**
  * What the inputs hold while the admin edits. Text and number inputs are strings
@@ -63,7 +67,7 @@ export type PropertyFormValues = {
   amenityIds: number[];
 
   // Publishing
-  status: "DRAFT" | "PUBLISHED";
+  status: ListingStatus;
   availability: Availability;
   isFeatured: boolean;
 };
@@ -109,6 +113,62 @@ export const EMPTY_PROPERTY: PropertyFormValues = {
   isFeatured: false,
 };
 
+/**
+ * A saved property as the edit form shows it: numbers as the text the admin
+ * would have typed ("85,000,000"), nulls as "". Runs on the server.
+ */
+export function toFormValues(property: Property, amenityIds: number[]): PropertyFormValues {
+  const text = (v: { toString(): string } | string | number | null) => (v === null ? "" : String(v));
+  const amount = (v: { toString(): string } | null) => (v === null ? "" : formatAmount(String(v)));
+  // landAreaSqm is filled from the size when left blank. If it still matches that
+  // estimate, show it blank again so it follows any change to the size.
+  const estimatedSqm =
+    property.landSize !== null && property.landSizeUnit !== null
+      ? Math.round(Number(property.landSize) * SQM_PER_UNIT[property.landSizeUnit] * 100) / 100
+      : null;
+  const landAreaIsEstimate = property.landAreaSqm !== null && Number(property.landAreaSqm) === estimatedSqm;
+  return {
+    name: property.name,
+    slug: property.slug,
+    summary: text(property.summary),
+    description: property.description,
+    listingType: property.listingType,
+    category: property.category,
+    type: property.type,
+    titleType: text(property.titleType),
+    price: amount(property.price),
+    currency: property.currency,
+    pricePeriod: property.pricePeriod,
+    isNegotiable: property.isNegotiable,
+    serviceCharge: amount(property.serviceCharge),
+    landSize: text(property.landSize),
+    landSizeUnit: property.landSizeUnit ?? "PLOT",
+    landAreaSqm: landAreaIsEstimate ? "" : amount(property.landAreaSqm),
+    floorAreaSqm: amount(property.floorAreaSqm),
+    bedrooms: text(property.bedrooms),
+    bathrooms: text(property.bathrooms),
+    toilets: text(property.toilets),
+    parkingSpaces: text(property.parkingSpaces),
+    floors: text(property.floors),
+    yearBuilt: text(property.yearBuilt),
+    furnishing: property.furnishing ?? "",
+    addressLine1: text(property.addressLine1),
+    addressLine2: text(property.addressLine2),
+    neighborhood: text(property.neighborhood),
+    city: property.city,
+    state: property.state,
+    country: property.country,
+    postalCode: text(property.postalCode),
+    latitude: text(property.latitude),
+    longitude: text(property.longitude),
+    showExactAddress: property.showExactAddress,
+    amenityIds,
+    status: property.status,
+    availability: property.availability,
+    isFeatured: property.isFeatured,
+  };
+}
+
 /** Fields that only describe a building; hidden (and cleared) for land. */
 export const BUILDING_FIELDS = [
   "floorAreaSqm",
@@ -136,7 +196,9 @@ export function toSchemaInput(values: PropertyFormValues) {
 /** Form sections, in page order. Used for the jump links and their error dots. */
 export const FORM_SECTIONS = [
   { id: "basics", title: "Basics", fields: ["name", "summary", "description", "slug"] },
+  { id: "photos", title: "Photos", fields: [] },
   { id: "listing", title: "Listing type", fields: ["listingType", "category", "type", "titleType"] },
+  { id: "documents", title: "Documents", fields: [] },
   { id: "price", title: "Price", fields: ["price", "currency", "pricePeriod", "isNegotiable", "serviceCharge"] },
   { id: "size", title: "Size and rooms", fields: ["landSize", "landSizeUnit", "landAreaSqm", ...BUILDING_FIELDS] },
   {

@@ -16,7 +16,7 @@ export default async function NewPropertyPage() {
     <>
       <AdminPageHeader
         title='Add property'
-        description='Photos and documents can be added once the property is saved.'
+        description='Photos and documents upload when you save.'
         actions={
           <Link href='/admin/properties' className={buttonVariants({ variant: 'ghost' })}>
             <ArrowLeft aria-hidden />
