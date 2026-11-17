@@ -37,3 +37,78 @@ export const ContactMessageSchema = z.object({
 });
 
 export type ContactMessageInput = z.output<typeof ContactMessageSchema>;
+
+// ── Enquiry about one property (the form on the property page) ─────────────
+
+export const ENQUIRY_INTENTS = {
+  viewing: 'Book an inspection',
+  question: 'Ask a question',
+} as const;
+export type EnquiryIntent = keyof typeof ENQUIRY_INTENTS;
+
+/** How far ahead someone can ask to inspect. */
+export const MAX_VIEWING_DAYS_AHEAD = 90;
+
+/** Today's date in Lagos as YYYY-MM-DD (West Africa Time is UTC+1, no daylight saving). */
+export function lagosToday(now = Date.now()) {
+  return new Date(now + 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+export function addDays(isoDate: string, days: number) {
+  const d = new Date(`${isoDate}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Phone is required to book an inspection (the agent calls to confirm the time);
+ * a question needs a message instead.
+ */
+export const PropertyEnquirySchema = z
+  .object({
+    propertyId: z.uuid({ error: 'This property is no longer listed' }),
+    intent: z.enum(Object.keys(ENQUIRY_INTENTS) as [EnquiryIntent, ...EnquiryIntent[]], {
+      error: 'Choose what you’d like to do',
+    }),
+    name: requiredText('your name', { min: 2, max: 120 }),
+    email: email(),
+    phone: phone(),
+    preferredDate: optionalText(10).refine(v => v == null || /^\d{4}-\d{2}-\d{2}$/.test(v), {
+      error: 'Pick a date from the calendar',
+    }),
+    message: optionalText(5000),
+  })
+  // Runs even when other fields failed, so every problem shows at once. Values
+  // may be unparsed here, hence the defensive reads.
+  .superRefine(
+    (v, ctx) => {
+      const text = (x: unknown) => (typeof x === 'string' ? x.trim() : '');
+      const message = text(v.message);
+      const date = text(v.preferredDate);
+      if (v.intent === 'viewing' && !text(v.phone)) {
+        ctx.addIssue({ code: 'custom', path: ['phone'], message: 'Add a phone number so we can confirm the time' });
+      }
+      if (v.intent === 'question' && message.length < 10) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['message'],
+          message: message ? 'Use at least 10 characters' : 'Enter your question',
+        });
+      }
+      if (v.intent === 'viewing' && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        const today = lagosToday();
+        if (date < today) {
+          ctx.addIssue({ code: 'custom', path: ['preferredDate'], message: 'Pick today or a later date' });
+        } else if (date > addDays(today, MAX_VIEWING_DAYS_AHEAD)) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['preferredDate'],
+            message: `Pick a date within the next ${MAX_VIEWING_DAYS_AHEAD} days`,
+          });
+        }
+      }
+    },
+    { when: () => true },
+  );
+
+export type PropertyEnquiryInput = z.output<typeof PropertyEnquirySchema>;

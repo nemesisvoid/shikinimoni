@@ -1,9 +1,10 @@
 'use server';
 
-import { revalidatePath } from 'next/cache';
+import { revalidatePath, updateTag } from 'next/cache';
 import * as z from 'zod';
 import { assertAdmin, getCurrentUser, isAdmin } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db';
+import { LISTINGS_TAG } from '@/lib/listings/tags';
 import {
   createDownloadUrl,
   createUploadUrl,
@@ -120,6 +121,7 @@ export async function attachPropertyDocuments(
     })),
   });
   revalidatePath('/admin', 'layout');
+  updateTag(LISTINGS_TAG); // photos and shared documents show on the public property page
   return { ok: true, data: { documents: created } };
 }
 
@@ -162,6 +164,7 @@ export async function arrangePropertyDocuments(input: unknown): Promise<Result<n
   }
 
   revalidatePath('/admin', 'layout');
+  updateTag(LISTINGS_TAG); // photos and shared documents show on the public property page
   return { ok: true, data: null };
 }
 

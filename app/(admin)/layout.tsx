@@ -1,4 +1,5 @@
 import { Suspense } from 'react';
+import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
 import { AdminSidebar } from '@/components/admin/admin-sidebar';
 import { AdminTopbar } from '@/components/admin/admin-topbar';
@@ -8,7 +9,11 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { countNewInquiries } from '@/lib/admin/queries';
 import { requireAdminPage } from '@/lib/auth/guards';
 
-export const metadata = { title: { default: 'Admin', template: '%s | ShikiniMoni admin' } };
+export const metadata: Metadata = {
+  title: { default: 'Admin', template: '%s | ShikiniMoni admin' },
+  // Also disallowed in robots.txt; this covers links that leak out anyway.
+  robots: { index: false, follow: false },
+};
 
 /**
  * Admin shell: shadcn sidebar + top bar. It reads cookies (sidebar state, session)

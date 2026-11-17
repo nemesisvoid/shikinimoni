@@ -7,11 +7,11 @@ import type {
 } from "@/lib/generated/prisma/enums";
 
 /**
- * The fields a listing card needs. Names and enum values mirror the Prisma
- * `Property` model, so swapping DUMMY_PROPERTIES for a `prisma.property.findMany`
- * (with `select` + the cover image from `media`) only changes the data source.
+ * Seed listings (prisma/seed.ts) and the hero photo. Names and enum values
+ * mirror the Prisma `Property` model. The site reads real listings through
+ * lib/listings/queries.ts; nothing public renders this list directly.
  */
-export type ListingCardData = {
+export type SeedProperty = {
   id: string;
   slug: string;
   name: string;
@@ -37,7 +37,7 @@ export type ListingCardData = {
 const photo = (id: string) => `https://images.unsplash.com/photo-${id}?auto=format&fit=crop&w=1600&q=75`;
 
 // Placeholder content for layout work. Prices, places and titles are illustrative.
-export const DUMMY_PROPERTIES: ListingCardData[] = [
+export const DUMMY_PROPERTIES: SeedProperty[] = [
   {
     id: "p-001",
     slug: "5-bedroom-detached-duplex-banana-island",
@@ -236,7 +236,115 @@ export const DUMMY_PROPERTIES: ListingCardData[] = [
     isFeatured: false,
     coverImage: { url: photo("1599809275671-b5942cabc7a2"), alt: "Warm-toned villa with a round pool at sunset" },
   },
+  {
+    id: "p-010",
+    slug: "4-bedroom-terrace-duplex-ikate",
+    name: "4-bedroom terrace duplex with rooftop terrace",
+    category: "RESIDENTIAL",
+    type: "TERRACE",
+    listingType: "SALE",
+    price: 120_000_000,
+    currency: "NGN",
+    pricePeriod: "TOTAL",
+    landSize: null,
+    landSizeUnit: null,
+    floorAreaSqm: 290,
+    bedrooms: 4,
+    bathrooms: 4,
+    neighborhood: "Ikate",
+    city: "Lekki",
+    state: "Lagos",
+    titleType: "Governor's Consent",
+    isFeatured: false,
+    coverImage: { url: photo("1600047509807-ba8f99d2cdde"), alt: "Modern two-storey house with timber cladding and a front lawn" },
+  },
+  {
+    id: "p-011",
+    slug: "600-sqm-residential-plot-guzape",
+    name: "600 sqm residential plot on a hillside",
+    category: "LAND",
+    type: "RESIDENTIAL_LAND",
+    listingType: "SALE",
+    price: 95_000_000,
+    currency: "NGN",
+    pricePeriod: "TOTAL",
+    landSize: 600,
+    landSizeUnit: "SQM",
+    floorAreaSqm: null,
+    bedrooms: null,
+    bathrooms: null,
+    neighborhood: "Guzape",
+    city: "Abuja",
+    state: "FCT",
+    titleType: "C of O",
+    isFeatured: false,
+    coverImage: { url: photo("1500382017468-9049fed747ef"), alt: "Open grassland at sunrise" },
+  },
+  {
+    id: "p-012",
+    slug: "3-bedroom-penthouse-ikoyi",
+    name: "3-bedroom penthouse with lagoon views",
+    category: "RESIDENTIAL",
+    type: "PENTHOUSE",
+    listingType: "RENT",
+    price: 45_000_000,
+    currency: "NGN",
+    pricePeriod: "PER_YEAR",
+    landSize: null,
+    landSizeUnit: null,
+    floorAreaSqm: 260,
+    bedrooms: 3,
+    bathrooms: 4,
+    neighborhood: "Old Ikoyi",
+    city: "Ikoyi",
+    state: "Lagos",
+    titleType: null,
+    isFeatured: false,
+    coverImage: { url: photo("1618221195710-dd6b41faaea6"), alt: "Living room with a long grey sofa, leather ottomans and high windows" },
+  },
 ];
+
+/**
+ * Extra photos for the seeded galleries, after each listing's cover. Exported
+ * for prisma/seed.ts; the URLs match next.config's allowed Unsplash pattern.
+ */
+export const SEED_GALLERY: Record<string, { url: string; alt: string }[]> = {
+  "p-001": [
+    { url: photo("1613977257363-707ba9348227"), alt: "The house by day, with the pool and sun loungers" },
+    { url: photo("1600607687939-ce8a6c25118c"), alt: "Open-plan living room with a white sofa and a timber feature wall" },
+    { url: photo("1484154218962-a197022b5858"), alt: "White kitchen with an island, bar stools and black pendant lights" },
+    { url: photo("1600573472550-8090b5e0745e"), alt: "Glass doors from the lounge onto the pool terrace" },
+    { url: photo("1616594039964-ae9021a400a0"), alt: "Main bedroom with a padded headboard and floor-length curtains" },
+    { url: photo("1552321554-5fefe8c9ef14"), alt: "White bathroom with a basin and hanging plants" },
+  ],
+  "p-002": [
+    { url: photo("1560448204-e02f11c3d0e2"), alt: "Bright lounge with beige sofas and wide windows" },
+    { url: photo("1556911220-bff31c812dba"), alt: "Kitchen with white cabinets and a marble worktop" },
+    { url: photo("1540518614846-7eded433c457"), alt: "Bedroom with orange cushions and two upholstered footstools" },
+  ],
+  "p-004": [
+    { url: photo("1586023492125-27b2c045efd7"), alt: "Reading corner with a yellow armchair and a floor lamp" },
+    { url: photo("1505693416388-ac5ce068fe85"), alt: "Bedroom with a tufted headboard and bedside lamps" },
+  ],
+  "p-005": [{ url: photo("1600210492486-724fe5c67fb0"), alt: "Living room with a brown leather sofa and framed photos on the wall" }],
+  "p-006": [{ url: photo("1631679706909-1844bbd07221"), alt: "Small lounge with a cream sofa and round wall mirrors" }],
+  "p-008": [
+    { url: photo("1497366811353-6870744d04b2"), alt: "Open-plan floor with glass walls and a meeting table" },
+    { url: photo("1497215728101-856f4ea42174"), alt: "Desk by floor-to-ceiling windows with plants" },
+    { url: photo("1524758631624-e2822e304c36"), alt: "Breakout area with armchairs and a floor lamp" },
+  ],
+  "p-009": [{ url: photo("1600585154340-be6161a56a0c"), alt: "Modern house with lit windows under a large tree at dusk" }],
+  "p-010": [
+    { url: photo("1600566753190-17f0baa2a6c3"), alt: "Front of the terrace with timber cladding and a gravel drive" },
+    { url: photo("1600607687939-ce8a6c25118c"), alt: "Open-plan living room with a white sofa and a timber feature wall" },
+    { url: photo("1556911220-bff31c812dba"), alt: "Kitchen with white cabinets and a marble worktop" },
+  ],
+  "p-012": [
+    { url: photo("1616594039964-ae9021a400a0"), alt: "Bedroom with a padded headboard and floor-length curtains" },
+    { url: photo("1484154218962-a197022b5858"), alt: "White kitchen with an island and black pendant lights" },
+    { url: photo("1552321554-5fefe8c9ef14"), alt: "White bathroom with a basin and hanging plants" },
+  ],
+};
 
 export const HERO_IMAGE = {
   url: photo("1613490493576-7fde63acd811"),

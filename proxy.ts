@@ -10,7 +10,9 @@ import { auth } from '@/lib/auth/server';
 // Role checks (admin) are never done here; always use requireAdmin().
 export default auth.middleware({
   loginUrl: '/auth/sign-in',
-  publicRoutes: ['/', '/contact', '/properties', '/properties/:id'],
+  // Each entry also covers its sub-paths ("/properties" includes every property page).
+  // robots.txt, the sitemap and the share image must stay reachable for crawlers.
+  publicRoutes: ['/', '/contact', '/properties', '/robots.txt', '/sitemap.xml', '/opengraph-image'],
 });
 
 export const config = {

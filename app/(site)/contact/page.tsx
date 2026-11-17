@@ -9,8 +9,9 @@ import { siteConfig } from '@/lib/site';
 import { isContactTopic } from '@/schemas/inquiry.schema';
 
 export const metadata: Metadata = {
-  title: `Contact us | ${siteConfig.name}`,
+  title: 'Contact us',
   description: `Questions about a listing, an inspection or selling your property? Message, call or WhatsApp the ${siteConfig.name} team.`,
+  alternates: { canonical: '/contact' },
 };
 
 export default function ContactPage({ searchParams }: PageProps<'/contact'>) {

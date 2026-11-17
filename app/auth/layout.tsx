@@ -1,7 +1,11 @@
 import { Suspense } from 'react';
+import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 import { Skeleton } from '@/components/ui/skeleton';
 import { getCurrentUser } from '@/lib/auth/guards';
+
+// Account screens have nothing worth showing in search results.
+export const metadata: Metadata = { robots: { index: false, follow: false } };
 
 /**
  * Sign-in and sign-up are for signed-out visitors only: anyone with a session
