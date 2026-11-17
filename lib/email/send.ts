@@ -33,7 +33,8 @@ function config() {
 
 /** The team inboxes that get new-enquiry alerts. */
 export function teamRecipients() {
-  const list = (process.env.ENQUIRY_NOTIFY_EMAIL ?? siteConfig.contactEmail)
+  // `||`, not `??`: a blank ENQUIRY_NOTIFY_EMAIL= line should still fall back.
+  const list = (process.env.ENQUIRY_NOTIFY_EMAIL?.trim() || siteConfig.contactEmail)
     .split(',')
     .map(s => s.trim())
     .filter(Boolean);
