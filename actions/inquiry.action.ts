@@ -1,9 +1,11 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { after } from 'next/server';
 import * as z from 'zod';
 import { getCurrentUser } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db';
+import { sendEnquiryEmails } from '@/lib/email/enquiries';
 import { RATE_LIMITED_MESSAGE, tooManyRecentInquiries } from '@/lib/inquiries';
 import { formDataToObject } from '@/schemas/form-data';
 import { PropertyEnquirySchema, type EnquiryIntent } from '@/schemas/inquiry.schema';
@@ -60,7 +62,7 @@ export async function sendPropertyEnquiry(_prev: EnquiryFormState, formData: For
     }
 
     const user = await getCurrentUser().catch(() => null);
-    await prisma.inquiry.create({
+    const inquiry = await prisma.inquiry.create({
       data: {
         type: data.intent === 'viewing' ? 'VIEWING_REQUEST' : 'GENERAL',
         name: data.name,
@@ -72,7 +74,10 @@ export async function sendPropertyEnquiry(_prev: EnquiryFormState, formData: For
         propertyId: property.id,
         userId: user?.id ?? null,
       },
+      select: { id: true },
     });
+    // Team alert + confirmation to the sender, once the response has gone out.
+    after(() => sendEnquiryEmails(inquiry.id));
   } catch (error) {
     console.error('sendPropertyEnquiry failed:', error);
     return {

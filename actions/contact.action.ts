@@ -1,8 +1,10 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { after } from 'next/server';
 import { getCurrentUser } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db';
+import { sendEnquiryEmails } from '@/lib/email/enquiries';
 import { RATE_LIMITED_MESSAGE, tooManyRecentInquiries } from '@/lib/inquiries';
 import { formDataToObject } from '@/schemas/form-data';
 import { CONTACT_TOPICS, ContactMessageSchema, type ContactTopic } from '@/schemas/inquiry.schema';
@@ -53,7 +55,7 @@ export async function sendContactMessage(_prev: ContactFormState, formData: Form
     }
 
     const user = await getCurrentUser().catch(() => null);
-    await prisma.inquiry.create({
+    const inquiry = await prisma.inquiry.create({
       data: {
         type: 'GENERAL',
         name: data.name,
@@ -62,7 +64,10 @@ export async function sendContactMessage(_prev: ContactFormState, formData: Form
         message: `${topicLine(data.topic)}\n\n${data.message}`,
         userId: user?.id ?? null,
       },
+      select: { id: true },
     });
+    // Team alert + confirmation to the sender, once the response has gone out.
+    after(() => sendEnquiryEmails(inquiry.id));
   } catch (error) {
     console.error('sendContactMessage failed:', error);
     return {
