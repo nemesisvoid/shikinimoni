@@ -20,6 +20,7 @@ export const PAGE_SIZES = [10, 20, 50, 100];
 export type AdminPropertyRow = {
   id: string;
   refNumber: number;
+  slug: string;
   name: string;
   location: string;
   status: ListingStatus;
@@ -32,6 +33,8 @@ export type AdminPropertyRow = {
   pricePeriod: PricePeriod;
   updatedAt: string;
   coverUrl: string | null;
+  /** ISO date when it was moved to Deleted; null for live rows. */
+  deletedAt: string | null;
 };
 
 /** Everything that lives in the URL. */
@@ -41,6 +44,8 @@ export type PropertyTableQuery = {
   listingType?: ListingType;
   category?: PropertyCategory;
   availability?: Availability;
+  /** The Deleted view: only properties moved to Deleted. */
+  deleted?: boolean;
   sort: PropertySort;
   page: number;
   pageSize: number;

@@ -1,4 +1,5 @@
 import { Button, Link, Section, Text } from '@react-email/components';
+import { whatsappNumber } from '@/lib/site';
 import { buttonStyle, colors, EmailLayout, text } from './layout';
 import type { EnquiryEmailData } from './types';
 
@@ -8,12 +9,6 @@ const HEADINGS: Record<EnquiryEmailData['kind'], string> = {
   offer: 'New offer on a property',
   contact: 'New message from the contact page',
 };
-
-/** "0803 123 4567" → "2348031234567" for wa.me links; leaves international numbers alone. */
-function whatsappNumber(phone: string) {
-  const digits = phone.replace(/\D/g, '');
-  return digits.startsWith('0') ? `234${digits.slice(1)}` : digits;
-}
 
 /** To the team: who wrote, how to reach them, and what about. Replying answers the sender directly. */
 export default function EnquiryAlertEmail({ enquiry: e, adminUrl }: { enquiry: EnquiryEmailData; adminUrl: string }) {

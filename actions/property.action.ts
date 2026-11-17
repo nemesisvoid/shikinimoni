@@ -1,9 +1,11 @@
 'use server';
 
 import { revalidatePath, updateTag } from 'next/cache';
+import { after } from 'next/server';
 import { assertAdmin } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db';
 import { LISTINGS_TAG } from '@/lib/listings/tags';
+import { deleteObjects, isStorageConfigured, type BucketKind } from '@/lib/storage/r2';
 import { Prisma } from '@/lib/generated/prisma/client';
 import { parseInput, type FieldErrors } from '@/schemas/form-data';
 import { uuid } from '@/schemas/fields';
@@ -154,6 +156,192 @@ export async function updateProperty(input: unknown): Promise<SavePropertyResult
 
   revalidateListings(data.status === 'PUBLISHED' || existing.status === 'PUBLISHED');
   return { ok: true, data: { id: propertyId, slug } };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Archive, delete, restore
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type PropertyActionResult = { ok: true; message: string } | { ok: false; error: string };
+
+const GONE = 'That property no longer exists. Refresh the page.';
+const ACTION_FAILED = "That didn't work. Try again in a moment.";
+
+/** Takes the listing off the site but keeps it in the main list, marked Archived. */
+export async function archiveProperty(id: unknown): Promise<PropertyActionResult> {
+  return changeStatus(id, 'ARCHIVED');
+}
+
+/** Archived → draft, so it can be edited and published again from the form. */
+export async function unarchiveProperty(id: unknown): Promise<PropertyActionResult> {
+  return changeStatus(id, 'DRAFT');
+}
+
+async function changeStatus(id: unknown, to: 'ARCHIVED' | 'DRAFT'): Promise<PropertyActionResult> {
+  const admin = await assertAdmin();
+  const propertyId = uuid().safeParse(id);
+  if (!propertyId.success) return { ok: false, error: GONE };
+
+  try {
+    const existing = await prisma.property.findFirst({
+      where: { id: propertyId.data, deletedAt: null },
+      select: { status: true, name: true },
+    });
+    if (!existing) return { ok: false, error: GONE };
+    if (existing.status === to) return { ok: true, message: to === 'ARCHIVED' ? 'Already archived.' : 'Already a draft.' };
+    if (to === 'DRAFT' && existing.status !== 'ARCHIVED') return { ok: false, error: 'Only archived properties can be unarchived.' };
+
+    await prisma.$transaction([
+      prisma.property.update({ where: { id: propertyId.data }, data: { status: to, updatedById: admin.id } }),
+      prisma.auditLog.create({
+        data: {
+          action: existing.status === 'PUBLISHED' ? 'UNPUBLISH' : 'STATUS_CHANGE',
+          entityType: 'Property',
+          entityId: propertyId.data,
+          changes: { status: { from: existing.status, to } },
+          actorId: admin.id,
+        },
+      }),
+    ]);
+    revalidateListings(existing.status === 'PUBLISHED');
+    return { ok: true, message: to === 'ARCHIVED' ? `Archived “${existing.name}”.` : `“${existing.name}” is a draft again.` };
+  } catch (error) {
+    console.error('changeStatus failed:', error);
+    return { ok: false, error: ACTION_FAILED };
+  }
+}
+
+/**
+ * Moves a property to Deleted: gone from the site and the main list, but its
+ * photos, documents and enquiry links are kept, so it can be restored.
+ */
+export async function deleteProperty(id: unknown): Promise<PropertyActionResult> {
+  const admin = await assertAdmin();
+  const propertyId = uuid().safeParse(id);
+  if (!propertyId.success) return { ok: false, error: GONE };
+
+  try {
+    const existing = await prisma.property.findFirst({
+      where: { id: propertyId.data, deletedAt: null },
+      select: { status: true, name: true },
+    });
+    if (!existing) return { ok: false, error: GONE };
+
+    await prisma.$transaction([
+      prisma.property.update({
+        where: { id: propertyId.data },
+        data: { deletedAt: new Date(), isFeatured: false, updatedById: admin.id },
+      }),
+      prisma.auditLog.create({
+        data: { action: 'DELETE', entityType: 'Property', entityId: propertyId.data, changes: { name: existing.name }, actorId: admin.id },
+      }),
+    ]);
+    revalidateListings(existing.status === 'PUBLISHED');
+    return { ok: true, message: `Deleted “${existing.name}”. You can restore it from Deleted.` };
+  } catch (error) {
+    console.error('deleteProperty failed:', error);
+    return { ok: false, error: ACTION_FAILED };
+  }
+}
+
+/** Brings a deleted property back. A listing that was live comes back as a draft, so nothing reappears on the site unchecked. */
+export async function restoreProperty(id: unknown): Promise<PropertyActionResult> {
+  const admin = await assertAdmin();
+  const propertyId = uuid().safeParse(id);
+  if (!propertyId.success) return { ok: false, error: GONE };
+
+  try {
+    const existing = await prisma.property.findFirst({
+      where: { id: propertyId.data, deletedAt: { not: null } },
+      select: { status: true, name: true },
+    });
+    if (!existing) return { ok: false, error: GONE };
+    const status = existing.status === 'PUBLISHED' ? 'DRAFT' : existing.status;
+
+    await prisma.$transaction([
+      prisma.property.update({ where: { id: propertyId.data }, data: { deletedAt: null, status, updatedById: admin.id } }),
+      prisma.auditLog.create({
+        data: {
+          action: 'RESTORE',
+          entityType: 'Property',
+          entityId: propertyId.data,
+          changes: { name: existing.name, ...(status !== existing.status ? { status: { from: existing.status, to: status } } : {}) },
+          actorId: admin.id,
+        },
+      }),
+    ]);
+    revalidateListings(false);
+    return {
+      ok: true,
+      message: existing.status === 'PUBLISHED' ? `Restored “${existing.name}” as a draft. Publish it when it’s ready.` : `Restored “${existing.name}”.`,
+    };
+  } catch (error) {
+    console.error('restoreProperty failed:', error);
+    return { ok: false, error: ACTION_FAILED };
+  }
+}
+
+/**
+ * Permanently removes a property that is already in Deleted, with its photos,
+ * documents and amenity ticks. Enquiries about it are kept (unlinked). The
+ * stored files are removed from the buckets after the response.
+ */
+export async function deletePropertyForever(id: unknown): Promise<PropertyActionResult> {
+  const admin = await assertAdmin();
+  const propertyId = uuid().safeParse(id);
+  if (!propertyId.success) return { ok: false, error: GONE };
+
+  try {
+    const existing = await prisma.property.findFirst({
+      where: { id: propertyId.data, deletedAt: { not: null } },
+      select: {
+        name: true,
+        refNumber: true,
+        media: { select: { storageKey: true } },
+        documents: { select: { storageKey: true } },
+      },
+    });
+    if (!existing) return { ok: false, error: 'Only properties in Deleted can be removed for good.' };
+
+    await prisma.$transaction([
+      prisma.property.delete({ where: { id: propertyId.data } }),
+      prisma.auditLog.create({
+        data: {
+          action: 'DELETE',
+          entityType: 'Property',
+          entityId: propertyId.data,
+          changes: { name: existing.name, refNumber: existing.refNumber, permanent: true },
+          actorId: admin.id,
+        },
+      }),
+    ]);
+
+    const mediaKeys = existing.media.map(m => m.storageKey).filter((k): k is string => !!k && !k.startsWith('seed/'));
+    const documentKeys = existing.documents.map(d => d.storageKey);
+    after(() => removeStoredFiles(mediaKeys, documentKeys));
+
+    revalidateListings(false);
+    return { ok: true, message: `“${existing.name}” was removed for good.` };
+  } catch (error) {
+    console.error('deletePropertyForever failed:', error);
+    return { ok: false, error: ACTION_FAILED };
+  }
+}
+
+/** Best effort: a leftover file only costs storage, so failures are logged, not shown. */
+async function removeStoredFiles(mediaKeys: string[], documentKeys: string[]) {
+  const jobs: [BucketKind, string[]][] = [
+    ['media', mediaKeys],
+    ['documents', documentKeys],
+  ];
+  for (const [kind, keys] of jobs) {
+    if (keys.length === 0 || !isStorageConfigured(kind)) continue;
+    try {
+      await deleteObjects(kind, keys);
+    } catch (error) {
+      console.error(`Removing ${kind} files failed:`, error);
+    }
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

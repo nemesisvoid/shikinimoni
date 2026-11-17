@@ -5,6 +5,7 @@ import { AdminSidebar } from '@/components/admin/admin-sidebar';
 import { AdminTopbar } from '@/components/admin/admin-topbar';
 import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Toaster } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { countNewInquiries } from '@/lib/admin/queries';
 import { requireAdminPage } from '@/lib/auth/guards';
@@ -47,6 +48,7 @@ async function AdminShell({ children }: { children: React.ReactNode }) {
           <div className='flex flex-1 flex-col gap-6 p-4 md:p-6 lg:p-8'>{children}</div>
         </SidebarInset>
       </SidebarProvider>
+      <Toaster position='bottom-right' />
     </TooltipProvider>
   );
 }

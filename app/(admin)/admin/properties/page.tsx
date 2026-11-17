@@ -1,3 +1,5 @@
+import { Suspense } from 'react';
+import { AdminPageSkeleton } from '@/components/admin/page-skeleton';
 import Link from 'next/link';
 import { Plus } from 'lucide-react';
 import { AdminEmptyState, AdminPageHeader } from '@/components/admin/page-header';
@@ -13,8 +15,17 @@ export const metadata = { title: 'Properties' };
 /**
  * Search, filters, sort and page all live in the URL, so the server only loads
  * the rows on screen and any view can be bookmarked or shared.
+ * The session check and data load stream into the skeleton, so navigating here is instant.
  */
-export default async function AdminPropertiesPage({ searchParams }: PageProps<'/admin/properties'>) {
+export default function AdminPropertiesPage(props: PageProps<'/admin/properties'>) {
+  return (
+    <Suspense fallback={<AdminPageSkeleton />}>
+      <AdminPropertiesPageContent {...props} />
+    </Suspense>
+  );
+}
+
+async function AdminPropertiesPageContent({ searchParams }: PageProps<'/admin/properties'>) {
   await requireAdminPage('/admin/properties');
   const params = await searchParams;
   const parsed = PropertyFiltersSchema.parse(params);
@@ -26,7 +37,7 @@ export default async function AdminPropertiesPage({ searchParams }: PageProps<'/
   };
 
   const { rows, total, page } = await listAdminPropertiesPage(filters);
-  const hasFilters = Boolean(filters.q || filters.status || filters.listingType || filters.category || filters.availability);
+  const hasFilters = Boolean(filters.q || filters.status || filters.listingType || filters.category || filters.availability || filters.deleted);
 
   const addButton = (
     <Link
@@ -59,6 +70,7 @@ export default async function AdminPropertiesPage({ searchParams }: PageProps<'/
     listingType: filters.listingType,
     category: filters.category,
     availability: filters.availability,
+    deleted: filters.deleted || undefined,
     sort: filters.sort,
     page,
     pageSize: filters.pageSize,
@@ -68,6 +80,7 @@ export default async function AdminPropertiesPage({ searchParams }: PageProps<'/
   const tableRows: AdminPropertyRow[] = rows.map(p => ({
     id: p.id,
     refNumber: p.refNumber,
+    slug: p.slug,
     name: p.name,
     location: [p.neighborhood, p.city, p.state].filter(Boolean).join(', '),
     status: p.status,
@@ -80,13 +93,18 @@ export default async function AdminPropertiesPage({ searchParams }: PageProps<'/
     pricePeriod: p.pricePeriod,
     updatedAt: p.updatedAt.toISOString(),
     coverUrl: p.media[0]?.url ?? null,
+    deletedAt: p.deletedAt?.toISOString() ?? null,
   }));
 
   return (
     <>
       <AdminPageHeader
         title='Properties'
-        description='Search, filter and sort your listings. Click a property to edit it.'
+        description={
+          filters.deleted
+            ? 'Deleted properties are off the site. Restore one to edit it again, or remove it for good.'
+            : 'Search, filter and sort your listings. Click a property to edit it.'
+        }
         actions={addButton}
       />
       <PropertiesDataTable

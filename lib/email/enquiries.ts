@@ -14,6 +14,7 @@ const lagosStamp = new Intl.DateTimeFormat('en-NG', {
   month: 'short',
   year: 'numeric',
   hour: 'numeric',
+  hourCycle: 'h12',
   minute: '2-digit',
   timeZone: 'Africa/Lagos',
 });
@@ -88,7 +89,7 @@ async function send(inquiryId: string) {
       sendEmail({
         to: team,
         subject: `${SUBJECT_PREFIX[kind]}: ${about} from ${enquiry.name}`,
-        react: EnquiryAlertEmail({ enquiry, adminUrl: `${siteConfig.url}/admin/inquiries` }),
+        react: EnquiryAlertEmail({ enquiry, adminUrl: `${siteConfig.url}/admin/inquiries/${inquiryId}` }),
         replyTo: enquiry.email,
         idempotencyKey: `enquiry-alert/${inquiryId}`,
         category: 'enquiry-alert',

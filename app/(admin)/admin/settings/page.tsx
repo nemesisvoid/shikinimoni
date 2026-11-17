@@ -1,9 +1,20 @@
+import { Suspense } from 'react';
+import { AdminPageSkeleton } from '@/components/admin/page-skeleton';
 import { AdminPageHeader, AdminPanel } from '@/components/admin/page-header';
 import { parseRoles, requireAdminPage } from '@/lib/auth/guards';
 
 export const metadata = { title: 'Settings' };
 
-export default async function AdminSettingsPage() {
+/** The session check and data load stream into the skeleton, so navigating here is instant. */
+export default function AdminSettingsPage() {
+  return (
+    <Suspense fallback={<AdminPageSkeleton />}>
+      <AdminSettingsPageContent />
+    </Suspense>
+  );
+}
+
+async function AdminSettingsPageContent() {
   const admin = await requireAdminPage('/admin/settings');
   const roles = parseRoles((admin as { role?: string | null }).role);
 

@@ -1,5 +1,6 @@
 import * as z from 'zod';
-import { optionalText, requiredText } from './fields';
+import { InquiryStatus } from '@/lib/generated/prisma/enums';
+import { optionalText, requiredEnum, requiredText, uuid } from './fields';
 
 /** What a contact-page message is about. Stored at the top of the inquiry message. */
 export const CONTACT_TOPICS = {
@@ -112,3 +113,13 @@ export const PropertyEnquirySchema = z
   );
 
 export type PropertyEnquiryInput = z.output<typeof PropertyEnquirySchema>;
+
+// ── Admin: handling an enquiry ──────────────────────────────────────────────
+
+export const UpdateInquirySchema = z.object({
+  id: uuid('enquiry'),
+  status: requiredEnum(InquiryStatus, 'a status'),
+  /** Internal only; never shown to the sender. Blank clears it. */
+  adminNotes: optionalText(5000),
+});
+export type UpdateInquiryInput = z.output<typeof UpdateInquirySchema>;

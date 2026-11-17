@@ -121,8 +121,16 @@ export function PropertyForm({ amenities, property }: { amenities: AmenityOption
     defaultValues: property?.values ?? EMPTY_PROPERTY,
     mode: 'onTouched',
   });
-  const { control, setValue, getValues, setError, handleSubmit, reset, formState } = form;
+  const { control, setValue, getValues, setError, handleSubmit, reset, resetField, getFieldState, formState } = form;
   const router = useRouter();
+
+  // Archive / unarchive from the page's "More" menu changes the status on the
+  // server. Follow it (unless the admin has changed the field themselves), or
+  // the next save would quietly put the old status back.
+  const serverStatus = property?.values.status;
+  useEffect(() => {
+    if (serverStatus && !getFieldState('status').isDirty) resetField('status', { defaultValue: serverStatus });
+  }, [serverStatus, getFieldState, resetField]);
   const [category, listingType, pricePeriod, currency, country, name, status, landSize, landSizeUnit, landAreaSqm, summary] = useWatch({
     control,
     name: ['category', 'listingType', 'pricePeriod', 'currency', 'country', 'name', 'status', 'landSize', 'landSizeUnit', 'landAreaSqm', 'summary'],

@@ -30,3 +30,9 @@ export const siteConfig = {
 
 /** "+234 800 000 0000" → "2348000000000" for tel: and wa.me links. */
 export const digitsOnly = (phone: string) => phone.replace(/\D/g, "");
+
+/** A visitor's number for wa.me links: "0803 123 4567" → "2348031234567"; international numbers are left alone. */
+export function whatsappNumber(phone: string) {
+  const digits = digitsOnly(phone);
+  return digits.startsWith("0") ? `234${digits.slice(1)}` : digits;
+}

@@ -1,8 +1,11 @@
+import { Suspense } from 'react';
+import { AdminPageSkeleton } from '@/components/admin/page-skeleton';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ArrowLeft, ExternalLink } from 'lucide-react';
 import { ListingStatusBadge } from '@/components/admin/badges';
 import { AdminPageHeader } from '@/components/admin/page-header';
+import { PropertyActions } from '@/components/admin/property-actions';
 import { PropertyForm } from '@/components/admin/property-form/property-form';
 import { toFormValues } from '@/components/admin/property-form/values';
 import { buttonVariants } from '@/components/ui/button';
@@ -14,8 +17,18 @@ import { uuid } from '@/schemas/fields';
 
 export const metadata = { title: 'Edit property' };
 
-/** The admin view of a property is its edit form. */
-export default async function EditPropertyPage({ params }: PageProps<'/admin/properties/[id]'>) {
+/** The admin view of a property is its edit form.
+ * The session check and data load stream into the skeleton, so navigating here is instant.
+ */
+export default function EditPropertyPage(props: PageProps<'/admin/properties/[id]'>) {
+  return (
+    <Suspense fallback={<AdminPageSkeleton />}>
+      <EditPropertyPageContent {...props} />
+    </Suspense>
+  );
+}
+
+async function EditPropertyPageContent({ params }: PageProps<'/admin/properties/[id]'>) {
   const { id } = await params;
   await requireAdminPage(`/admin/properties/${id}`);
   if (!uuid().safeParse(id).success) notFound();
@@ -52,6 +65,10 @@ export default async function EditPropertyPage({ params }: PageProps<'/admin/pro
                 <ExternalLink aria-hidden />
               </a>
             )}
+            <PropertyActions
+              variant='page'
+              property={{ id: property.id, name: property.name, slug: property.slug, status: property.status, deleted: false }}
+            />
           </>
         }
       />
