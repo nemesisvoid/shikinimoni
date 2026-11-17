@@ -1,5 +1,16 @@
+/**
+ * The public origin, used for canonical URLs, the sitemap and share links.
+ * Set NEXT_PUBLIC_SITE_URL in production (e.g. https://shikinimoni.com).
+ */
+const siteUrl = (
+  process.env.NEXT_PUBLIC_SITE_URL ??
+  (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : "http://localhost:3000")
+).replace(/\/+$/, "");
+
 export const siteConfig = {
   name: "ShikiniMoni",
+  url: siteUrl,
+  tagline: "Land and homes with papers you can trust",
   description: "Buy, rent or lease land and homes across Nigeria, with title documents shown on every listing.",
   // TODO: replace every contact detail below with the real ones before launch.
   contactEmail: "hello@shikinimoni.com",

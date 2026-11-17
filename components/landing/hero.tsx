@@ -5,7 +5,7 @@ import { Roofline } from "@/components/landing/roofline";
 import { HERO_IMAGE } from "@/lib/data/dummy-properties";
 
 const SEARCH_TYPES = [
-  { value: "", label: "All" },
+  { value: "all", label: "All" },
   { value: "sale", label: "Buy" },
   { value: "rent", label: "Rent" },
   { value: "land", label: "Land" },
@@ -47,7 +47,7 @@ export function Hero() {
 function HeroSearch() {
   return (
     <form
-      action="/#listings"
+      action="/properties"
       method="get"
       role="search"
       aria-label="Search listings"
@@ -62,7 +62,7 @@ function HeroSearch() {
                 type="radio"
                 name="type"
                 value={option.value}
-                defaultChecked={option.value === ""}
+                defaultChecked={option.value === "all"}
                 className="peer sr-only"
               />
               <span className="block rounded-full px-4 py-1.5 text-sm font-medium text-muted-foreground transition-[background-color,color,box-shadow] duration-200 ease-out-soft peer-checked:bg-background peer-checked:text-foreground peer-checked:shadow-sm peer-focus-visible:ring-3 peer-focus-visible:ring-ring/40 hover:text-foreground">

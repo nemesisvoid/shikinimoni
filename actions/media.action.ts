@@ -1,9 +1,10 @@
 'use server';
 
-import { revalidatePath } from 'next/cache';
+import { revalidatePath, updateTag } from 'next/cache';
 import * as z from 'zod';
 import { assertAdmin } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db';
+import { LISTINGS_TAG } from '@/lib/listings/tags';
 import {
   createUploadUrl,
   deleteObjects,
@@ -135,6 +136,7 @@ export async function attachPropertyPhotos(
     return { ok: false, error: 'That property no longer exists.' };
   }
   revalidatePath('/admin', 'layout');
+  updateTag(LISTINGS_TAG); // photos and shared documents show on the public property page
   return {
     ok: true,
     data: { photos: created.map((m) => ({ id: m.id, storageKey: m.storageKey!, url: m.url })) },
@@ -185,6 +187,7 @@ export async function arrangePropertyPhotos(input: unknown): Promise<Result<null
   }
 
   revalidatePath('/admin', 'layout');
+  updateTag(LISTINGS_TAG); // photos and shared documents show on the public property page
   return { ok: true, data: null };
 }
 

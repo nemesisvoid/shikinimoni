@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, ExternalLink } from 'lucide-react';
 import { ListingStatusBadge } from '@/components/admin/badges';
 import { AdminPageHeader } from '@/components/admin/page-header';
 import { PropertyForm } from '@/components/admin/property-form/property-form';
@@ -9,6 +9,7 @@ import { buttonVariants } from '@/components/ui/button';
 import { getPropertyForEdit, listAmenities } from '@/lib/admin/queries';
 import { requireAdminPage } from '@/lib/auth/guards';
 import { formatRelativeTime } from '@/lib/format';
+import { propertyPath } from '@/lib/listings/search';
 import { uuid } from '@/schemas/fields';
 
 export const metadata = { title: 'Edit property' };
@@ -34,12 +35,24 @@ export default async function EditPropertyPage({ params }: PageProps<'/admin/pro
           </span>
         }
         actions={
-          <Link
-            href='/admin/properties'
-            className={buttonVariants({ variant: 'ghost' })}>
-            <ArrowLeft aria-hidden />
-            All properties
-          </Link>
+          <>
+            <Link
+              href='/admin/properties'
+              className={buttonVariants({ variant: 'ghost' })}>
+              <ArrowLeft aria-hidden />
+              All properties
+            </Link>
+            {property.status === 'PUBLISHED' && (
+              <a
+                href={propertyPath(property.slug)}
+                target='_blank'
+                rel='noopener'
+                className={buttonVariants({ variant: 'outline' })}>
+                View on site
+                <ExternalLink aria-hidden />
+              </a>
+            )}
+          </>
         }
       />
       <PropertyForm

@@ -1,16 +1,15 @@
 'use server';
 
-import { revalidatePath } from 'next/cache';
+import { revalidatePath, updateTag } from 'next/cache';
 import { assertAdmin } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db';
+import { LISTINGS_TAG } from '@/lib/listings/tags';
 import { Prisma } from '@/lib/generated/prisma/client';
 import { parseInput, type FieldErrors } from '@/schemas/form-data';
 import { uuid } from '@/schemas/fields';
 import { CreatePropertySchema, type CreatePropertyInput } from '@/schemas/property.schema';
 
-export type SavePropertyResult =
-  | { ok: true; data: { id: string; slug: string } }
-  | { ok: false; error: string; fieldErrors?: FieldErrors };
+export type SavePropertyResult = { ok: true; data: { id: string; slug: string } } | { ok: false; error: string; fieldErrors?: FieldErrors };
 
 const SLUG_MAX = 200;
 const NEEDS_ATTENTION = 'Some fields need attention.';
@@ -42,7 +41,7 @@ export async function createProperty(input: unknown): Promise<SavePropertyResult
   // Two admins saving the same name at once can still clash; retry with a new suffix.
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const property = await prisma.$transaction(async (tx) => {
+      const property = await prisma.$transaction(async tx => {
         const created = await tx.property.create({
           data: {
             ...data,
@@ -50,7 +49,7 @@ export async function createProperty(input: unknown): Promise<SavePropertyResult
             publishedAt: data.status === 'PUBLISHED' ? new Date() : null,
             createdById: admin.id,
             updatedById: admin.id,
-            amenities: { create: amenityIds.map((amenityId) => ({ amenityId })) },
+            amenities: { create: amenityIds.map(amenityId => ({ amenityId })) },
           },
           select: { id: true, slug: true },
         });
@@ -116,12 +115,12 @@ export async function updateProperty(input: unknown): Promise<SavePropertyResult
 
   const goesLive = data.status === 'PUBLISHED' && existing.status !== 'PUBLISHED';
   const changes = diff(existing, { ...data, slug });
-  const oldAmenities = existing.amenities.map((a) => a.amenityId).sort((a, b) => a - b);
+  const oldAmenities = existing.amenities.map(a => a.amenityId).sort((a, b) => a - b);
   const newAmenities = [...amenityIds].sort((a, b) => a - b);
   if (oldAmenities.join() !== newAmenities.join()) changes.amenityIds = { from: oldAmenities, to: newAmenities };
 
   try {
-    await prisma.$transaction(async (tx) => {
+    await prisma.$transaction(async tx => {
       await tx.property.update({
         where: { id: propertyId },
         data: {
@@ -133,16 +132,12 @@ export async function updateProperty(input: unknown): Promise<SavePropertyResult
       });
       if ('amenityIds' in changes) {
         await tx.propertyAmenity.deleteMany({ where: { propertyId } });
-        await tx.propertyAmenity.createMany({ data: amenityIds.map((amenityId) => ({ propertyId, amenityId })) });
+        await tx.propertyAmenity.createMany({ data: amenityIds.map(amenityId => ({ propertyId, amenityId })) });
       }
       if (Object.keys(changes).length > 0) {
         await tx.auditLog.create({
           data: {
-            action: goesLive
-              ? 'PUBLISH'
-              : existing.status === 'PUBLISHED' && data.status !== 'PUBLISHED'
-                ? 'UNPUBLISH'
-                : 'UPDATE',
+            action: goesLive ? 'PUBLISH' : existing.status === 'PUBLISHED' && data.status !== 'PUBLISHED' ? 'UNPUBLISH' : 'UPDATE',
             entityType: 'Property',
             entityId: propertyId,
             changes: changes as Prisma.InputJsonValue,
@@ -208,7 +203,7 @@ async function freeSlug(base: string, excludeId?: string) {
     where: { slug: { startsWith: base }, ...(excludeId ? { id: { not: excludeId } } : {}) },
     select: { slug: true },
   });
-  const taken = new Set(rows.map((r) => r.slug));
+  const taken = new Set(rows.map(r => r.slug));
   if (!taken.has(base)) return base;
   for (let n = 2; ; n++) {
     const suffix = `-${n}`;
@@ -229,7 +224,7 @@ function isUniqueSlugError(error: unknown) {
 /** { price: { from: "85000000", to: "80000000" } } for the fields that changed. */
 function diff(before: Record<string, unknown>, after: Record<string, unknown>) {
   const changes: Record<string, { from: unknown; to: unknown }> = {};
-  const plain = (v: unknown) => (v instanceof Prisma.Decimal ? v.toNumber() : v instanceof Date ? v.toISOString() : v ?? null);
+  const plain = (v: unknown) => (v instanceof Prisma.Decimal ? v.toNumber() : v instanceof Date ? v.toISOString() : (v ?? null));
   for (const [key, value] of Object.entries(after)) {
     const from = plain(before[key]);
     const to = plain(value);
@@ -240,5 +235,10 @@ function diff(before: Record<string, unknown>, after: Record<string, unknown>) {
 
 function revalidateListings(touchesPublicSite: boolean) {
   revalidatePath('/admin', 'layout');
-  if (touchesPublicSite) revalidatePath('/', 'layout');
+  if (touchesPublicSite) {
+    // Expires every cached public listing query (lib/listings/queries.ts), so the
+    // change shows on the site at once instead of within the hour.
+    updateTag(LISTINGS_TAG);
+    revalidatePath('/', 'layout');
+  }
 }

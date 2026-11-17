@@ -6,9 +6,10 @@ const COLUMNS = [
   {
     title: "Explore",
     links: [
-      { href: "/?type=sale#listings", label: "Buy" },
-      { href: "/?type=rent#listings", label: "Rent" },
-      { href: "/?type=land#listings", label: "Land" },
+      { href: "/properties?type=sale", label: "Buy" },
+      { href: "/properties?type=rent", label: "Rent" },
+      { href: "/properties?type=land", label: "Land" },
+      { href: "/properties", label: "All properties" },
     ],
   },
   {
@@ -46,7 +47,7 @@ export function SiteFooter() {
       </div>
       <div className="border-t">
         <p className="mx-auto max-w-7xl px-4 py-6 text-xs text-muted-foreground sm:px-6 lg:px-8">
-          © ShikiniMoni. Listings and photos on this page are placeholders.
+          © ShikiniMoni. Prices and availability can change; confirm with our team before you pay anything.
         </p>
       </div>
     </footer>
