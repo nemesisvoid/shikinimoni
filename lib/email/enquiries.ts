@@ -6,6 +6,7 @@ import { prisma } from '@/lib/db';
 import { locationLine } from '@/lib/listings/format';
 import { formatRef, propertyPath } from '@/lib/listings/search';
 import { siteConfig } from '@/lib/site';
+import { readSiteContact } from '@/lib/site-settings';
 import { sendEmail, teamRecipients } from './send';
 
 const lagosDay = new Intl.DateTimeFormat('en-NG', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Africa/Lagos' });
@@ -54,6 +55,7 @@ async function send(inquiryId: string) {
     },
   });
   if (!row) return;
+  const contact = await readSiteContact();
 
   const kind: EnquiryEmailData['kind'] = !row.property
     ? 'contact'
@@ -79,9 +81,10 @@ async function send(inquiryId: string) {
           url: `${siteConfig.url}${propertyPath(row.property.slug)}`,
         }
       : null,
+    team: { phone: contact.phone, replyTime: contact.replyTime, address: contact.officeLines.join(', ') },
   };
 
-  const team = teamRecipients();
+  const team = teamRecipients(contact);
   const about = enquiry.property ? `${enquiry.property.name} (${enquiry.property.ref})` : enquiry.message.split('\n')[0].replace(/^About: /, '');
 
   await Promise.all([

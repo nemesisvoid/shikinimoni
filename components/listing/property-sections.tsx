@@ -26,7 +26,8 @@ import { formatPrice, formatSize, LISTING_TYPE_LABEL } from '@/lib/format';
 import { locationLine } from '@/lib/listings/format';
 import { formatRef, LISTINGS_PATH, listingSearchHref, propertyPath } from '@/lib/listings/search';
 import type { ListingDetail } from '@/lib/listings/types';
-import { digitsOnly, siteConfig } from '@/lib/site';
+import { siteConfig, telHref, whatsappHref } from '@/lib/site';
+import { getSiteContact } from '@/lib/site-settings';
 import { cn } from '@/lib/utils';
 
 const listedDate = new Intl.DateTimeFormat('en-NG', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Africa/Lagos' });
@@ -341,7 +342,8 @@ export function Location({ listing: p }: { listing: ListingDetail }) {
 
 // ── The enquiry card (sticky beside the content on large screens) ───────────
 
-export function EnquiryCard({ listing }: { listing: ListingDetail }) {
+export async function EnquiryCard({ listing }: { listing: ListingDetail }) {
+  const contact = await getSiteContact();
   const { amount, suffix } = formatPrice(listing.price, listing.currency, listing.pricePeriod);
   const serviceCharge = listing.serviceCharge !== null ? formatPrice(listing.serviceCharge, listing.currency, 'PER_YEAR') : null;
   const closed = listing.availability !== 'AVAILABLE';
@@ -393,12 +395,13 @@ export function EnquiryCard({ listing }: { listing: ListingDetail }) {
         <EnquiryForm
           propertyId={listing.id}
           closed={closed && listing.availability !== 'UNDER_OFFER'}
+          replyTime={contact.replyTime}
         />
       </div>
 
       <div className='mt-6 grid grid-cols-2 gap-2 border-t pt-6'>
         <a
-          href={`https://wa.me/${digitsOnly(siteConfig.whatsapp)}?text=${encodeURIComponent(whatsappText)}`}
+          href={whatsappHref(contact.whatsapp, whatsappText)}
           target='_blank'
           rel='noopener noreferrer'
           className={buttonVariants({ variant: 'outline', size: 'lg' })}>
@@ -406,7 +409,7 @@ export function EnquiryCard({ listing }: { listing: ListingDetail }) {
           WhatsApp
         </a>
         <a
-          href={`tel:+${digitsOnly(siteConfig.phone)}`}
+          href={telHref(contact.phone)}
           className={buttonVariants({ variant: 'outline', size: 'lg' })}>
           <Phone aria-hidden />
           Call

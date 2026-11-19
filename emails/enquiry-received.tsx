@@ -1,5 +1,5 @@
 import { Button, Link, Section, Text } from '@react-email/components';
-import { siteConfig } from '@/lib/site';
+import { telHref } from '@/lib/site';
 import { buttonStyle, colors, EmailLayout, text } from './layout';
 import type { EnquiryEmailData } from './types';
 
@@ -13,10 +13,12 @@ export default function EnquiryReceivedEmail({ enquiry: e }: { enquiry: EnquiryE
   const viewing = e.kind === 'viewing';
   const next = viewing
     ? `We'll call you${e.phone ? ` on ${e.phone}` : ''} to confirm a time${e.preferredDate ? ` close to ${e.preferredDate}` : ''}. Nobody needs to travel until it's confirmed.`
-    : `Someone from our team will reply to this address ${siteConfig.replyTime}.`;
+    : `Someone from our team will reply to this address ${e.team.replyTime}.`;
 
   return (
-    <EmailLayout preview={viewing ? 'We got your inspection request.' : 'We got your message.'}>
+    <EmailLayout
+      preview={viewing ? 'We got your inspection request.' : 'We got your message.'}
+      address={e.team.address}>
       <Text style={text.heading}>
         Thanks, {firstName}. {viewing ? 'Your inspection request is in.' : 'We got your message.'}
       </Text>
@@ -51,9 +53,9 @@ export default function EnquiryReceivedEmail({ enquiry: e }: { enquiry: EnquiryE
       <Text style={{ ...text.muted, margin: 0 }}>
         Need us sooner? Call or WhatsApp{' '}
         <Link
-          href={`tel:+${siteConfig.phone.replace(/\D/g, '')}`}
+          href={telHref(e.team.phone)}
           style={{ color: colors.plum }}>
-          {siteConfig.phone}
+          {e.team.phone}
         </Link>
         {e.property ? ` and quote ${e.property.ref}.` : '.'}
       </Text>
@@ -76,5 +78,6 @@ EnquiryReceivedEmail.PreviewProps = {
       location: 'Banana Island, Ikoyi, Lagos',
       url: 'http://localhost:3000/properties/5-bedroom-detached-duplex-banana-island',
     },
+    team: { phone: '+234 800 000 0000', replyTime: 'within one working day', address: 'Lekki Phase 1, Lagos, Nigeria' },
   },
 } satisfies { enquiry: EnquiryEmailData };

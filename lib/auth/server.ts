@@ -17,3 +17,15 @@ export const auth = createNeonAuth({
   baseUrl,
   cookies: { secret },
 });
+
+type AuthCallResult = { data: unknown; error: { status: number; code?: string; message: string } | null };
+
+/**
+ * The admin-plugin calls this app uses. @neon/auth 0.8 types `auth.admin` as
+ * `unknown`, though it proxies every admin endpoint at runtime, so the calls
+ * are typed here. They run as the signed-in user; Neon Auth checks that
+ * they're an admin.
+ */
+export const authAdmin = auth.admin as {
+  setRole(args: { userId: string; role: 'user' | 'admin' }): Promise<AuthCallResult>;
+};

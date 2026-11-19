@@ -14,7 +14,9 @@ const HEADINGS: Record<EnquiryEmailData['kind'], string> = {
 export default function EnquiryAlertEmail({ enquiry: e, adminUrl }: { enquiry: EnquiryEmailData; adminUrl: string }) {
   const firstName = e.name.split(/\s+/)[0];
   return (
-    <EmailLayout preview={`${e.name}: ${e.message.slice(0, 90)}`}>
+    <EmailLayout
+      preview={`${e.name}: ${e.message.slice(0, 90)}`}
+      address={e.team.address}>
       <Text style={text.heading}>{HEADINGS[e.kind]}</Text>
       <Text style={text.muted}>Received {e.receivedAt}. Reply to this email to answer {firstName} directly.</Text>
 
@@ -99,5 +101,6 @@ EnquiryAlertEmail.PreviewProps = {
       location: 'Banana Island, Ikoyi, Lagos',
       url: 'http://localhost:3000/properties/5-bedroom-detached-duplex-banana-island',
     },
+    team: { phone: '+234 800 000 0000', replyTime: 'within one working day', address: 'Lekki Phase 1, Lagos, Nigeria' },
   },
 } satisfies { enquiry: EnquiryEmailData; adminUrl: string };

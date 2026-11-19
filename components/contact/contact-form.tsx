@@ -8,7 +8,7 @@ import { FieldMessage, TextInput } from '@/components/forms/text-field';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
-import { digitsOnly, siteConfig } from '@/lib/site';
+import { telHref } from '@/lib/site';
 import { CONTACT_TOPICS, isContactTopic, type ContactTopic } from '@/schemas/inquiry.schema';
 
 const TOPIC_ICONS: Record<ContactTopic, React.ReactNode> = {
@@ -37,19 +37,23 @@ const FIELD_ORDER = ['topic', 'name', 'email', 'phone', 'message'] as const;
 
 export type ContactDefaults = { topic?: ContactTopic; name?: string; email?: string };
 
+/** From Site settings: the reply promise and the number for urgent questions. */
+export type ContactPromise = { replyTime: string; phone: string };
+
 /** Remounts the form for "Send another message", which clears useActionState. */
-export function ContactForm({ defaults = {} }: { defaults?: ContactDefaults }) {
+export function ContactForm({ defaults = {}, contact }: { defaults?: ContactDefaults; contact: ContactPromise }) {
   const [round, setRound] = useState(0);
   return (
     <ContactFormInner
       key={round}
       defaults={defaults}
+      contact={contact}
       onReset={() => setRound(r => r + 1)}
     />
   );
 }
 
-function ContactFormInner({ defaults, onReset }: { defaults: ContactDefaults; onReset: () => void }) {
+function ContactFormInner({ defaults, contact, onReset }: { defaults: ContactDefaults; contact: ContactPromise; onReset: () => void }) {
   const [state, formAction, isPending] = useActionState<ContactFormState, FormData>(sendContactMessage, { status: 'idle' });
   const id = useId();
   const formRef = useRef<HTMLFormElement>(null);
@@ -96,12 +100,12 @@ function ContactFormInner({ defaults, onReset }: { defaults: ContactDefaults; on
             Thanks, {state.name}. Your message is with our team.
           </h2>
           <p className='mt-3 max-w-prose text-lead text-muted-foreground'>
-            We&apos;ll reply to <span className='font-medium text-foreground'>{state.email}</span> {siteConfig.replyTime}. If
+            We&apos;ll reply to <span className='font-medium text-foreground'>{state.email}</span> {contact.replyTime}. If
             it&apos;s urgent, call or WhatsApp us on{' '}
             <a
-              href={`tel:+${digitsOnly(siteConfig.phone)}`}
+              href={telHref(contact.phone)}
               className='font-medium whitespace-nowrap text-primary underline-offset-4 hover:underline'>
-              {siteConfig.phone}
+              {contact.phone}
             </a>
             .
           </p>
@@ -257,7 +261,7 @@ function ContactFormInner({ defaults, onReset }: { defaults: ContactDefaults; on
       {/* ── Send ──────────────────────────────────────────────────────── */}
       <div className='flex flex-col gap-4 border-t pt-6 sm:flex-row sm:items-center sm:justify-between'>
         <p className='max-w-sm text-sm text-muted-foreground'>
-          We reply {siteConfig.replyTime} and only use your details to answer you.
+          We reply {contact.replyTime} and only use your details to answer you.
         </p>
         <Button
           type='submit'

@@ -6,6 +6,7 @@ import { ContactForm } from '@/components/contact/contact-form';
 import { Skeleton } from '@/components/ui/skeleton';
 import { getCurrentUser } from '@/lib/auth/guards';
 import { siteConfig } from '@/lib/site';
+import { getSiteContact } from '@/lib/site-settings';
 import { isContactTopic } from '@/schemas/inquiry.schema';
 
 export const metadata: Metadata = {
@@ -14,14 +15,15 @@ export const metadata: Metadata = {
   alternates: { canonical: '/contact' },
 };
 
-export default function ContactPage({ searchParams }: PageProps<'/contact'>) {
+export default async function ContactPage({ searchParams }: PageProps<'/contact'>) {
+  const { replyTime } = await getSiteContact();
   return (
     <>
       <section className='mx-auto max-w-7xl px-4 pt-12 pb-10 sm:px-6 lg:px-8 lg:pt-20 lg:pb-14'>
         <h1 className='max-w-3xl text-display text-ink-950 motion-safe:animate-rise'>Talk to someone who knows the papers.</h1>
         <p className='mt-5 max-w-2xl text-lead text-muted-foreground motion-safe:animate-rise [animation-delay:120ms]'>
           Questions about a listing, an inspection, or selling your land or house? Send us a message and a real person replies{' '}
-          {siteConfig.replyTime}.
+          {replyTime}.
         </p>
       </section>
 
@@ -49,7 +51,7 @@ export default function ContactPage({ searchParams }: PageProps<'/contact'>) {
  * Signed-in visitors get their name and email filled in.
  */
 async function PrefilledContactForm({ searchParams }: { searchParams: PageProps<'/contact'>['searchParams'] }) {
-  const [params, user] = await Promise.all([searchParams, getCurrentUser().catch(() => null)]);
+  const [params, user, contact] = await Promise.all([searchParams, getCurrentUser().catch(() => null), getSiteContact()]);
   const topic = Array.isArray(params.topic) ? params.topic[0] : params.topic;
   return (
     <ContactForm
@@ -58,6 +60,7 @@ async function PrefilledContactForm({ searchParams }: { searchParams: PageProps<
         name: user?.name ?? undefined,
         email: user?.email ?? undefined,
       }}
+      contact={{ replyTime: contact.replyTime, phone: contact.phone }}
     />
   );
 }

@@ -210,6 +210,20 @@ export function listAmenities() {
   });
 }
 
+/** Everyone with an account whose role includes admin, oldest first, plus how many other accounts exist. */
+export async function getTeam() {
+  const [candidates, total] = await Promise.all([
+    prisma.user.findMany({
+      where: { role: { contains: "admin" } },
+      orderBy: { createdAt: "asc" },
+      select: { id: true, name: true, email: true, image: true, role: true, banned: true, createdAt: true },
+    }),
+    prisma.user.count(),
+  ]);
+  const admins = candidates.filter(u => (u.role ?? "").split(",").some(r => r.trim() === "admin"));
+  return { admins, otherAccounts: total - admins.length };
+}
+
 export function countNewInquiries() {
   return prisma.inquiry.count({ where: { status: "NEW" } });
 }

@@ -449,3 +449,29 @@ model AuditLog {
   @@map("audit_logs")
   @@schema("public")
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Site settings
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// One row (id 1), edited in Admin → Site settings. Until it's saved for the
+/// first time the site uses the defaults in lib/site.ts. Read it through
+/// lib/site-settings.ts, which caches it and fills the gaps.
+model SiteSettings {
+  id            Int      @id @default(1)
+  contactEmail  String   @db.VarChar(254)
+  phone         String   @db.VarChar(40)
+  whatsapp      String   @db.VarChar(40)
+  /// One line per row, e.g. "Lekki Phase 1\nLagos, Nigeria".
+  officeAddress String   @db.VarChar(300)
+  /// [{ "days": "Monday to Friday", "time": "9am to 6pm" }, ...]
+  openingHours  Json
+  /// Finishes "We reply …", e.g. "within one working day".
+  replyTime     String   @db.VarChar(60)
+  /// Who gets new-enquiry alerts, comma-separated. Empty = the contact email.
+  alertEmails   String?  @db.VarChar(1000)
+  updatedAt     DateTime @updatedAt @db.Timestamptz(3)
+
+  @@map("site_settings")
+  @@schema("public")
+}
