@@ -1,4 +1,5 @@
 import { Button, Link, Section, Text } from '@react-email/components';
+import { whatsappNumber } from '@/lib/site';
 import { buttonStyle, colors, EmailLayout, text } from './layout';
 import type { EnquiryEmailData } from './types';
 
@@ -9,17 +10,13 @@ const HEADINGS: Record<EnquiryEmailData['kind'], string> = {
   contact: 'New message from the contact page',
 };
 
-/** "0803 123 4567" → "2348031234567" for wa.me links; leaves international numbers alone. */
-function whatsappNumber(phone: string) {
-  const digits = phone.replace(/\D/g, '');
-  return digits.startsWith('0') ? `234${digits.slice(1)}` : digits;
-}
-
 /** To the team: who wrote, how to reach them, and what about. Replying answers the sender directly. */
 export default function EnquiryAlertEmail({ enquiry: e, adminUrl }: { enquiry: EnquiryEmailData; adminUrl: string }) {
   const firstName = e.name.split(/\s+/)[0];
   return (
-    <EmailLayout preview={`${e.name}: ${e.message.slice(0, 90)}`}>
+    <EmailLayout
+      preview={`${e.name}: ${e.message.slice(0, 90)}`}
+      address={e.team.address}>
       <Text style={text.heading}>{HEADINGS[e.kind]}</Text>
       <Text style={text.muted}>Received {e.receivedAt}. Reply to this email to answer {firstName} directly.</Text>
 
@@ -104,5 +101,6 @@ EnquiryAlertEmail.PreviewProps = {
       location: 'Banana Island, Ikoyi, Lagos',
       url: 'http://localhost:3000/properties/5-bedroom-detached-duplex-banana-island',
     },
+    team: { phone: '+234 800 000 0000', replyTime: 'within one working day', address: 'Lekki Phase 1, Lagos, Nigeria' },
   },
 } satisfies { enquiry: EnquiryEmailData; adminUrl: string };

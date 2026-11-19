@@ -38,6 +38,15 @@ export const requiredText = (label: string, { min = 1, max }: { min?: number; ma
 export const optionalText = (max: number) =>
   z.preprocess(blankTo(null), z.string().max(max, { error: `Use ${max} characters or fewer` }).nullish());
 
+/** Trimmed and lower-cased. */
+export const emailAddress = () =>
+  z.preprocess(
+    v => (typeof v === 'string' ? v.trim().toLowerCase() || undefined : v),
+    z
+      .email({ error: 'Enter an email address like name@example.com' })
+      .max(254, { error: 'Use 254 characters or fewer' }),
+  );
+
 // ── Numbers ─────────────────────────────────────────────────────────────────
 
 /**

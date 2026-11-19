@@ -1,36 +1,38 @@
 import { Clock, Mail, MapPin, MessageCircle, Phone } from 'lucide-react';
 import { Roofline } from '@/components/landing/roofline';
-import { digitsOnly, siteConfig } from '@/lib/site';
+import { telHref, whatsappHref } from '@/lib/site';
+import { getSiteContact } from '@/lib/site-settings';
 
 const WHATSAPP_GREETING = 'Hello ShikiniMoni, I have a question about a property.';
 
 /** The plum panel beside the form: the faster ways to reach a person. */
-export function ContactChannels() {
+export async function ContactChannels() {
+  const contact = await getSiteContact();
   const channels = [
     {
-      href: `https://wa.me/${digitsOnly(siteConfig.whatsapp)}?text=${encodeURIComponent(WHATSAPP_GREETING)}`,
+      href: whatsappHref(contact.whatsapp, WHATSAPP_GREETING),
       icon: <MessageCircle />,
       label: 'WhatsApp',
-      value: siteConfig.whatsapp,
+      value: contact.whatsapp,
       note: 'Quickest for photos and documents',
       external: true,
     },
     {
-      href: `tel:+${digitsOnly(siteConfig.phone)}`,
+      href: telHref(contact.phone),
       icon: <Phone />,
       label: 'Call us',
-      value: siteConfig.phone,
+      value: contact.phone,
       note: 'During office hours',
     },
     {
-      href: `mailto:${siteConfig.contactEmail}`,
+      href: `mailto:${contact.contactEmail}`,
       icon: <Mail />,
       label: 'Email',
-      value: siteConfig.contactEmail,
-      note: `We reply ${siteConfig.replyTime}`,
+      value: contact.contactEmail,
+      note: `We reply ${contact.replyTime}`,
     },
   ];
-  const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(siteConfig.office.lines.join(', '))}`;
+  const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(contact.officeLines.join(', '))}`;
 
   return (
     <aside
@@ -77,9 +79,9 @@ export function ContactChannels() {
           <div>
             <h3 className='text-sm text-plum-200'>Office</h3>
             <address className='mt-1 font-medium not-italic'>
-              {siteConfig.office.lines.map(line => (
+              {contact.officeLines.map((line, i) => (
                 <span
-                  key={line}
+                  key={`${line}-${i}`}
                   className='block'>
                   {line}
                 </span>
@@ -102,8 +104,8 @@ export function ContactChannels() {
           <div>
             <h3 className='text-sm text-plum-200'>Office hours</h3>
             <dl className='mt-1 flex flex-col gap-1'>
-              {siteConfig.office.hours.map(h => (
-                <div key={h.days}>
+              {contact.hours.map((h, i) => (
+                <div key={`${h.days}-${i}`}>
                   <dt className='font-medium'>{h.days}</dt>
                   <dd className='text-sm text-plum-100'>{h.time}</dd>
                 </div>

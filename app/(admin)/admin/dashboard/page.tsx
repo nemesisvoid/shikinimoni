@@ -1,3 +1,5 @@
+import { Suspense } from 'react';
+import { AdminPageSkeleton } from '@/components/admin/page-skeleton';
 import Link from 'next/link';
 import { Plus } from 'lucide-react';
 import { AvailabilityBreakdown } from '@/components/admin/availability-breakdown';
@@ -17,7 +19,16 @@ const viewAll = (href: string, label: string) => (
   </Link>
 );
 
-export default async function AdminDashboardPage() {
+/** The session check and data load stream into the skeleton, so navigating here is instant. */
+export default function AdminDashboardPage() {
+  return (
+    <Suspense fallback={<AdminPageSkeleton />}>
+      <AdminDashboardPageContent />
+    </Suspense>
+  );
+}
+
+async function AdminDashboardPageContent() {
   const admin = await requireAdminPage('/admin/dashboard');
   const data = await getDashboardData();
   const firstName = admin.name?.trim().split(/\s+/)[0];

@@ -23,13 +23,13 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
-  Pencil,
   Search,
   Star,
   X,
 } from 'lucide-react';
 import { AvailabilityLabel, ListingStatusBadge } from '@/components/admin/badges';
-import { Button, buttonVariants } from '@/components/ui/button';
+import { PropertyActions } from '@/components/admin/property-actions';
+import { Button } from '@/components/ui/button';
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -79,6 +79,7 @@ function hrefFor(query: PropertyTableQuery) {
   if (query.listingType) params.set('listingType', query.listingType);
   if (query.category) params.set('category', query.category);
   if (query.availability) params.set('availability', query.availability);
+  if (query.deleted) params.set('deleted', 'true');
   if (query.sort !== DEFAULT_SORT) params.set('sort', query.sort);
   if (query.page > 1) params.set('page', String(query.page));
   if (query.pageSize !== DEFAULT_PAGE_SIZE) params.set('pageSize', String(query.pageSize));
@@ -103,7 +104,14 @@ const columns = column.columns([
   column.accessor('status', {
     header: 'Status',
     enableSorting: false,
-    cell: ({ getValue }) => <ListingStatusBadge status={getValue()} />,
+    cell: ({ row, getValue }) =>
+      row.original.deletedAt ? (
+        <span className='inline-flex items-center rounded-full bg-destructive/10 px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap text-destructive'>
+          Deleted
+        </span>
+      ) : (
+        <ListingStatusBadge status={getValue()} />
+      ),
   }),
   column.accessor('availability', {
     header: 'Availability',
@@ -149,13 +157,15 @@ const columns = column.columns([
     id: 'actions',
     header: () => <span className='sr-only'>Actions</span>,
     cell: ({ row }) => (
-      <Link
-        href={`/admin/properties/${row.original.id}`}
-        className={buttonVariants({ variant: 'ghost', size: 'sm' })}
-        aria-label={`Edit ${row.original.name}`}>
-        <Pencil aria-hidden />
-        Edit
-      </Link>
+      <PropertyActions
+        property={{
+          id: row.original.id,
+          name: row.original.name,
+          slug: row.original.slug,
+          status: row.original.status,
+          deleted: row.original.deletedAt !== null,
+        }}
+      />
     ),
   }),
 ]);
@@ -169,7 +179,12 @@ const COLUMN_CLASS: Record<string, string> = {
   actions: 'pr-3 text-right w-0',
 };
 
-const STATUS_OPTIONS = Object.fromEntries(Object.entries(LISTING_STATUS_META).map(([k, v]) => [k, v.label]));
+/** "Deleted" isn't a status: it switches the table to the Deleted view (?deleted=true). */
+const DELETED = 'DELETED';
+const STATUS_OPTIONS = {
+  ...Object.fromEntries(Object.entries(LISTING_STATUS_META).map(([k, v]) => [k, v.label])),
+  [DELETED]: 'Deleted',
+};
 const LISTING_TYPE_FILTER = Object.fromEntries(Object.entries(LISTING_TYPE_OPTIONS).map(([k, v]) => [k, v.label]));
 const CATEGORY_FILTER = Object.fromEntries(Object.entries(CATEGORY_OPTIONS).map(([k, v]) => [k, v.label]));
 
@@ -216,7 +231,7 @@ export function PropertiesDataTable({
     },
   });
 
-  const hasFilters = Boolean(query.q || query.status || query.listingType || query.category || query.availability);
+  const hasFilters = Boolean(query.q || query.status || query.listingType || query.category || query.availability || query.deleted);
   const firstRow = total === 0 ? 0 : (query.page - 1) * query.pageSize + 1;
   const lastRow = Math.min(total, query.page * query.pageSize);
   const pageCount = Math.max(1, table.getPageCount());
@@ -234,8 +249,12 @@ export function PropertiesDataTable({
             label='Status'
             allLabel='Any status'
             options={STATUS_OPTIONS}
-            value={query.status}
-            onChange={v => filter({ status: v as ListingStatus | undefined })}
+            value={query.deleted ? DELETED : query.status}
+            onChange={v =>
+              v === DELETED
+                ? filter({ status: undefined, deleted: true })
+                : filter({ status: v as ListingStatus | undefined, deleted: undefined })
+            }
           />
           <FilterSelect
             label='Offered'
@@ -262,7 +281,9 @@ export function PropertiesDataTable({
             <Button
               type='button'
               variant='ghost'
-              onClick={() => filter({ q: undefined, status: undefined, listingType: undefined, category: undefined, availability: undefined })}>
+              onClick={() =>
+                filter({ q: undefined, status: undefined, listingType: undefined, category: undefined, availability: undefined, deleted: undefined })
+              }>
               <X aria-hidden />
               Clear
             </Button>
@@ -331,8 +352,17 @@ export function PropertiesDataTable({
                 <TableCell
                   colSpan={columns.length}
                   className='py-14 text-center'>
-                  <p className='font-medium'>No properties match{query.q ? ` “${query.q}”` : ' these filters'}.</p>
-                  <p className='mt-1 text-sm text-muted-foreground'>Try another search, or clear the filters to see everything.</p>
+                  {query.deleted && !query.q && !query.listingType && !query.category && !query.availability ? (
+                    <>
+                      <p className='font-medium'>Nothing in Deleted.</p>
+                      <p className='mt-1 text-sm text-muted-foreground'>Properties you delete wait here until you restore them or remove them for good.</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className='font-medium'>No properties match{query.q ? ` “${query.q}”` : ' these filters'}.</p>
+                      <p className='mt-1 text-sm text-muted-foreground'>Try another search, or clear the filters to see everything.</p>
+                    </>
+                  )}
                 </TableCell>
               </TableRow>
             )}
@@ -443,17 +473,22 @@ function PropertyCell({ row }: { row: AdminPropertyRow }) {
         )}
       </div>
       <div className='min-w-0'>
-        <Link
-          href={`/admin/properties/${row.id}`}
-          className='flex max-w-[20rem] items-center gap-1.5 font-medium underline-offset-4 hover:underline'>
-          <span className='truncate'>{row.name}</span>
-          {row.isFeatured && (
-            <Star
-              aria-label='Featured'
-              className='size-3.5 shrink-0 fill-sunset-400 text-sunset-500'
-            />
-          )}
-        </Link>
+        {row.deletedAt ? (
+          // Deleted properties can't be edited until they're restored.
+          <p className='max-w-[20rem] truncate font-medium text-muted-foreground'>{row.name}</p>
+        ) : (
+          <Link
+            href={`/admin/properties/${row.id}`}
+            className='flex max-w-[20rem] items-center gap-1.5 font-medium underline-offset-4 hover:underline'>
+            <span className='truncate'>{row.name}</span>
+            {row.isFeatured && (
+              <Star
+                aria-label='Featured'
+                className='size-3.5 shrink-0 fill-sunset-400 text-sunset-500'
+              />
+            )}
+          </Link>
+        )}
         <p className='max-w-[20rem] truncate text-xs text-muted-foreground'>{row.location || 'No location yet'}</p>
       </div>
     </div>

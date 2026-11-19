@@ -6,6 +6,7 @@ import { prisma } from '@/lib/db';
 import { locationLine } from '@/lib/listings/format';
 import { formatRef, propertyPath } from '@/lib/listings/search';
 import { siteConfig } from '@/lib/site';
+import { readSiteContact } from '@/lib/site-settings';
 import { sendEmail, teamRecipients } from './send';
 
 const lagosDay = new Intl.DateTimeFormat('en-NG', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Africa/Lagos' });
@@ -14,6 +15,7 @@ const lagosStamp = new Intl.DateTimeFormat('en-NG', {
   month: 'short',
   year: 'numeric',
   hour: 'numeric',
+  hourCycle: 'h12',
   minute: '2-digit',
   timeZone: 'Africa/Lagos',
 });
@@ -53,6 +55,7 @@ async function send(inquiryId: string) {
     },
   });
   if (!row) return;
+  const contact = await readSiteContact();
 
   const kind: EnquiryEmailData['kind'] = !row.property
     ? 'contact'
@@ -78,9 +81,10 @@ async function send(inquiryId: string) {
           url: `${siteConfig.url}${propertyPath(row.property.slug)}`,
         }
       : null,
+    team: { phone: contact.phone, replyTime: contact.replyTime, address: contact.officeLines.join(', ') },
   };
 
-  const team = teamRecipients();
+  const team = teamRecipients(contact);
   const about = enquiry.property ? `${enquiry.property.name} (${enquiry.property.ref})` : enquiry.message.split('\n')[0].replace(/^About: /, '');
 
   await Promise.all([
@@ -88,7 +92,7 @@ async function send(inquiryId: string) {
       sendEmail({
         to: team,
         subject: `${SUBJECT_PREFIX[kind]}: ${about} from ${enquiry.name}`,
-        react: EnquiryAlertEmail({ enquiry, adminUrl: `${siteConfig.url}/admin/inquiries` }),
+        react: EnquiryAlertEmail({ enquiry, adminUrl: `${siteConfig.url}/admin/inquiries/${inquiryId}` }),
         replyTo: enquiry.email,
         idempotencyKey: `enquiry-alert/${inquiryId}`,
         category: 'enquiry-alert',

@@ -10,4 +10,6 @@ export type EnquiryEmailData = {
   /** "17 Nov 2026, 2:15 pm" in Lagos time. */
   receivedAt: string;
   property: { name: string; ref: string; location: string; url: string } | null;
+  /** From Site settings. */
+  team: { phone: string; replyTime: string; address: string };
 };

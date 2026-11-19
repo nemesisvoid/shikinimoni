@@ -6,7 +6,6 @@ import { sendPropertyEnquiry, type EnquiryFormState } from '@/actions/inquiry.ac
 import { FieldMessage, TextInput } from '@/components/forms/text-field';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { siteConfig } from '@/lib/site';
 import { cn } from '@/lib/utils';
 import { addDays, ENQUIRY_INTENTS, lagosToday, MAX_VIEWING_DAYS_AHEAD, type EnquiryIntent } from '@/schemas/inquiry.schema';
 
@@ -21,7 +20,7 @@ const longDate = new Intl.DateTimeFormat('en-NG', { weekday: 'long', day: 'numer
 const formatDay = (iso: string) => longDate.format(new Date(`${iso}T12:00:00Z`));
 
 /** Remounts the form for "Send another", which clears useActionState. */
-export function EnquiryForm(props: { propertyId: string; closed: boolean }) {
+export function EnquiryForm(props: { propertyId: string; closed: boolean; replyTime: string }) {
   const [round, setRound] = useState(0);
   return (
     <EnquiryFormInner
@@ -32,7 +31,17 @@ export function EnquiryForm(props: { propertyId: string; closed: boolean }) {
   );
 }
 
-function EnquiryFormInner({ propertyId, closed, onReset }: { propertyId: string; closed: boolean; onReset: () => void }) {
+function EnquiryFormInner({
+  propertyId,
+  closed,
+  replyTime,
+  onReset,
+}: {
+  propertyId: string;
+  closed: boolean;
+  replyTime: string;
+  onReset: () => void;
+}) {
   const [state, formAction, isPending] = useActionState<EnquiryFormState, FormData>(sendPropertyEnquiry, { status: 'idle' });
   const id = useId();
   const formRef = useRef<HTMLFormElement>(null);
@@ -92,7 +101,7 @@ function EnquiryFormInner({ propertyId, closed, onReset }: { propertyId: string;
           Thanks, {state.name}.{' '}
           {isViewing
             ? `We'll call you to confirm a time${state.preferredDate ? ` close to ${formatDay(state.preferredDate)}` : ''}.`
-            : `We'll reply to ${state.email} ${siteConfig.replyTime}.`}
+            : `We'll reply to ${state.email} ${replyTime}.`}
         </p>
         <Button
           type='button'
@@ -263,7 +272,7 @@ function EnquiryFormInner({ propertyId, closed, onReset }: { propertyId: string;
         {isPending ? 'Sending…' : viewing ? 'Request an inspection' : 'Send question'}
       </Button>
       <p className={cn('-mt-2 text-center text-xs text-muted-foreground')}>
-        {viewing ? 'We call to confirm the time before anyone travels.' : `We reply ${siteConfig.replyTime}.`}
+        {viewing ? 'We call to confirm the time before anyone travels.' : `We reply ${replyTime}.`}
       </p>
 
       {state.status === 'error' && (

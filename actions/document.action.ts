@@ -2,7 +2,7 @@
 
 import { revalidatePath, updateTag } from 'next/cache';
 import * as z from 'zod';
-import { assertAdmin, getCurrentUser, isAdmin } from '@/lib/auth/guards';
+import { assertAdmin, currentUserIsAdmin } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db';
 import { LISTINGS_TAG } from '@/lib/listings/tags';
 import {
@@ -190,7 +190,7 @@ export async function getDocumentLink(input: unknown): Promise<Result<{ url: str
   if (!doc) return { ok: false, error: 'Document not found.' };
 
   const visibleToPublic = doc.isPublic && doc.property.status === 'PUBLISHED' && doc.property.deletedAt === null;
-  if (!visibleToPublic && !isAdmin(await getCurrentUser())) return { ok: false, error: 'Document not found.' };
+  if (!visibleToPublic && !(await currentUserIsAdmin())) return { ok: false, error: 'Document not found.' };
 
   if (!isStorageConfigured('documents')) return { ok: false, error: NOT_CONFIGURED };
   const extension = doc.mimeType === 'application/pdf' ? '.pdf' : doc.mimeType === 'image/png' ? '.png' : '.jpg';

@@ -1,14 +1,17 @@
 import 'server-only';
 import type { ReactElement } from 'react';
 import { Resend } from 'resend';
-import { siteConfig } from '@/lib/site';
+import type { SiteContact } from '@/lib/site';
 
 /**
  * Outgoing email through Resend. Configured by three env vars:
  *
  *   RESEND_API_KEY        API key from resend.com/api-keys (sending access is enough)
  *   EMAIL_FROM            Sender on your verified domain, e.g. "ShikiniMoni <hello@shikinimoni.com>"
- *   ENQUIRY_NOTIFY_EMAIL  Who gets new-enquiry alerts; comma-separate several. Defaults to the site's contact email.
+ *   ENQUIRY_NOTIFY_EMAIL  Who gets new-enquiry alerts when Admin → Site settings doesn't say; comma-separate several.
+ *
+ * Alert recipients, first match wins: the "Enquiry alerts go to" field in Site
+ * settings, then ENQUIRY_NOTIFY_EMAIL, then the site's contact email.
  *
  * Without RESEND_API_KEY or EMAIL_FROM nothing is sent (a warning is logged), so
  * local development and the forms keep working before email is set up.
@@ -32,9 +35,10 @@ function config() {
 }
 
 /** The team inboxes that get new-enquiry alerts. */
-export function teamRecipients() {
+export function teamRecipients(contact: SiteContact) {
+  if (contact.alertEmails.length > 0) return contact.alertEmails;
   // `||`, not `??`: a blank ENQUIRY_NOTIFY_EMAIL= line should still fall back.
-  const list = (process.env.ENQUIRY_NOTIFY_EMAIL?.trim() || siteConfig.contactEmail)
+  const list = (process.env.ENQUIRY_NOTIFY_EMAIL?.trim() || contact.contactEmail)
     .split(',')
     .map(s => s.trim())
     .filter(Boolean);

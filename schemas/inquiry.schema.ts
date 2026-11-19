@@ -1,5 +1,6 @@
 import * as z from 'zod';
-import { optionalText, requiredText } from './fields';
+import { InquiryStatus } from '@/lib/generated/prisma/enums';
+import { emailAddress, optionalText, requiredEnum, requiredText, uuid } from './fields';
 
 /** What a contact-page message is about. Stored at the top of the inquiry message. */
 export const CONTACT_TOPICS = {
@@ -11,13 +12,7 @@ export const CONTACT_TOPICS = {
 export type ContactTopic = keyof typeof CONTACT_TOPICS;
 export const isContactTopic = (v: unknown): v is ContactTopic => typeof v === 'string' && v in CONTACT_TOPICS;
 
-const email = () =>
-  z.preprocess(
-    v => (typeof v === 'string' ? v.trim().toLowerCase() || undefined : v),
-    z
-      .email({ error: 'Enter an email address like name@example.com' })
-      .max(254, { error: 'Use 254 characters or fewer' }),
-  );
+const email = emailAddress;
 
 /** Digits, spaces, brackets, dashes and a leading +. Blank is fine. */
 const phone = () =>
@@ -112,3 +107,13 @@ export const PropertyEnquirySchema = z
   );
 
 export type PropertyEnquiryInput = z.output<typeof PropertyEnquirySchema>;
+
+// ── Admin: handling an enquiry ──────────────────────────────────────────────
+
+export const UpdateInquirySchema = z.object({
+  id: uuid('enquiry'),
+  status: requiredEnum(InquiryStatus, 'a status'),
+  /** Internal only; never shown to the sender. Blank clears it. */
+  adminNotes: optionalText(5000),
+});
+export type UpdateInquiryInput = z.output<typeof UpdateInquirySchema>;

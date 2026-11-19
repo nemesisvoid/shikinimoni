@@ -1,6 +1,7 @@
 import "server-only";
 import { notFound, redirect } from "next/navigation";
 import { connection } from "next/server";
+import { prisma } from "@/lib/db";
 import { auth } from "./server";
 
 export type SessionUser = NonNullable<
@@ -71,12 +72,30 @@ export function isAuthorizationError(error: unknown): error is AuthorizationErro
   return error instanceof AuthorizationError;
 }
 
-/** The one place the admin rule lives; both guards below delegate to it. */
+/**
+ * The one place the admin rule lives; every guard below delegates to it.
+ *
+ * The session comes from a signed cookie that Neon Auth caches for up to five
+ * minutes, so its role and name can be stale. Role, ban and name are read from
+ * neon_auth.user instead: removing someone's admin access takes effect on their
+ * next request, and a renamed admin sees the new name at once.
+ */
 async function checkAdmin(): Promise<{ user: SessionUser } | { code: AuthorizationCode }> {
-  const user = await getCurrentUser();
-  if (!user) return { code: "UNAUTHORIZED" };
+  const session = await getCurrentUser();
+  if (!session) return { code: "UNAUTHORIZED" };
+  const row = await prisma.user.findUnique({
+    where: { id: session.id },
+    select: { name: true, role: true, banned: true },
+  });
+  if (!row) return { code: "UNAUTHORIZED" };
+  const user = { ...session, name: row.name, role: row.role, banned: row.banned } as SessionUser;
   if (!isAdmin(user)) return { code: "FORBIDDEN" };
   return { user };
+}
+
+/** True only for a signed-in admin, checked against the database. Never throws. */
+export async function currentUserIsAdmin(): Promise<boolean> {
+  return "user" in (await checkAdmin());
 }
 
 /**

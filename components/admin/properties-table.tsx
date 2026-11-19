@@ -11,7 +11,6 @@ import { formatPrice, formatRelativeTime } from "@/lib/format";
  * breakdown sits beside it, and the panel is narrower than the full page.
  */
 export function PropertiesTable({ rows, compact = false }: { rows: ListingRow[]; compact?: boolean }) {
-  const now = Date.now();
   return (
     <Table className={compact ? "min-w-136" : "min-w-208"}>
       <TableHeader>
@@ -70,7 +69,7 @@ export function PropertiesTable({ rows, compact = false }: { rows: ListingRow[];
                 </TableCell>
               )}
               <TableCell className="pr-5 text-right text-sm whitespace-nowrap text-muted-foreground">
-                <time dateTime={p.updatedAt.toISOString()}>{formatRelativeTime(p.updatedAt, now)}</time>
+                <time dateTime={p.updatedAt.toISOString()}>{formatRelativeTime(p.updatedAt)}</time>
               </TableCell>
             </TableRow>
           );

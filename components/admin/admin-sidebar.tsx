@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ChevronsUpDown, ExternalLink, House, LogOut } from "lucide-react";
+import { ChevronsUpDown, CircleUser, ExternalLink, House, LogOut } from "lucide-react";
 import { Logo } from "@/components/brand/logo";
 import { ADMIN_NAV } from "@/components/admin/nav";
 import { initialsFor } from "@/lib/format";
@@ -149,6 +149,10 @@ function UserMenu({ user }: { user: AdminSidebarUser }) {
               </DropdownMenuLabel>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
+            <DropdownMenuItem render={<Link href="/admin/profile" />}>
+              <CircleUser />
+              Your profile
+            </DropdownMenuItem>
             <DropdownMenuItem render={<Link href="/" target="_blank" rel="noreferrer" />}>
               <ExternalLink />
               View site

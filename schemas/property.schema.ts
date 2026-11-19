@@ -315,6 +315,8 @@ export const PropertyFiltersSchema = z
     featured: param(z.stringbool()),
     /** Admin only: include soft-deleted listings. */
     includeDeleted: param(z.stringbool()),
+    /** Admin only: show only soft-deleted listings (the Deleted view). */
+    deleted: param(z.stringbool()),
     sort: z.preprocess(firstParam, z.enum(PROPERTY_SORTS)).catch('newest'),
     page: z.preprocess(firstParam, z.coerce.number().int().min(1).max(10_000)).catch(1),
     pageSize: z.preprocess(firstParam, z.coerce.number().int().min(1).max(100)).catch(20),

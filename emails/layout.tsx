@@ -20,7 +20,7 @@ export const colors = {
 const font =
   "'Manrope', 'Noto Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
 
-export function EmailLayout({ preview, children }: { preview: string; children: React.ReactNode }) {
+export function EmailLayout({ preview, address, children }: { preview: string; address: string; children: React.ReactNode }) {
   return (
     <Html lang='en'>
       <Head />
@@ -41,7 +41,7 @@ export function EmailLayout({ preview, children }: { preview: string; children: 
           </Section>
           <Hr style={{ borderColor: 'transparent', margin: '8px 0' }} />
           <Text style={{ margin: '0 4px', fontSize: 12, lineHeight: '18px', color: colors.muted }}>
-            {siteConfig.name} · {siteConfig.office.lines.join(', ')} ·{' '}
+            {siteConfig.name} · {address} ·{' '}
             <Link
               href={siteConfig.url}
               style={{ color: colors.muted, textDecoration: 'underline' }}>

@@ -28,5 +28,12 @@ export const UpdateAmenitySchema = z
 
 export const AmenityIdSchema = z.object({ id: amenityId() });
 
+/** The admin amenities page: add (no id) or rename / regroup (with id). The slug follows the name. */
+export const AmenityFormSchema = z.object({
+  name: requiredText('an amenity name', { min: 2, max: 80 }),
+  group: optionalText(60),
+});
+export const EditAmenitySchema = AmenityFormSchema.extend({ id: amenityId() });
+
 export type CreateAmenityInput = z.output<typeof CreateAmenitySchema>;
 export type UpdateAmenityInput = z.output<typeof UpdateAmenitySchema>;

@@ -1,29 +1,36 @@
-import { AdminPageHeader, AdminPanel } from '@/components/admin/page-header';
-import { parseRoles, requireAdminPage } from '@/lib/auth/guards';
+import { Suspense } from 'react';
+import { AdminPageSkeleton } from '@/components/admin/page-skeleton';
+import { AdminPageHeader } from '@/components/admin/page-header';
+import { SiteSettingsForm } from '@/components/admin/site-settings-form';
+import { requireAdminPage } from '@/lib/auth/guards';
+import { readSiteContact } from '@/lib/site-settings';
 
-export const metadata = { title: 'Settings' };
+export const metadata = { title: 'Site settings' };
 
-export default async function AdminSettingsPage() {
-  const admin = await requireAdminPage('/admin/settings');
-  const roles = parseRoles((admin as { role?: string | null }).role);
+/** The session check and data load stream into the skeleton, so navigating here is instant. */
+export default function AdminSettingsPage() {
+  return (
+    <Suspense fallback={<AdminPageSkeleton />}>
+      <AdminSettingsPageContent />
+    </Suspense>
+  );
+}
+
+async function AdminSettingsPageContent() {
+  await requireAdminPage('/admin/settings');
+  // Uncached, so the form always starts from what's saved.
+  const contact = await readSiteContact();
 
   return (
     <>
-      <AdminPageHeader title='Settings' description='Your admin account. Site-wide settings will live here too.' />
-      <AdminPanel title='Account' className='max-w-2xl'>
-        <dl className='divide-y border-t text-sm'>
-          {[
-            ['Name', admin.name || 'Not set'],
-            ['Email', admin.email],
-            ['Roles', roles.join(', ') || 'none'],
-          ].map(([label, value]) => (
-            <div key={label} className='grid grid-cols-[8rem_1fr] gap-4 px-5 py-3.5'>
-              <dt className='text-muted-foreground'>{label}</dt>
-              <dd className='font-medium break-all'>{value}</dd>
-            </div>
-          ))}
-        </dl>
-      </AdminPanel>
+      <AdminPageHeader
+        title='Site settings'
+        description='Contact details and office hours visitors see, and where enquiry alerts go. Saved changes show on the site straight away.'
+      />
+      <SiteSettingsForm
+        contact={contact}
+        envAlertFallback={process.env.ENQUIRY_NOTIFY_EMAIL?.trim() || null}
+      />
     </>
   );
 }

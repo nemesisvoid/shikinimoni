@@ -1,7 +1,8 @@
 import "server-only";
 import { prisma } from "@/lib/db";
 import type { Prisma } from "@/lib/generated/prisma/client";
-import type { Availability, ListingStatus } from "@/lib/generated/prisma/enums";
+import type { Availability, InquiryStatus, ListingStatus } from "@/lib/generated/prisma/enums";
+import { INQUIRY_VIEWS, type InquiryView } from "@/lib/admin/inquiry-views";
 import type { PropertyFilters, PropertySort } from "@/schemas/property.schema";
 
 /**
@@ -100,7 +101,7 @@ export async function listAdminPropertiesPage(filters: PropertyFilters) {
   const q = filters.q?.trim();
   const refMatch = q?.match(/^(?:prp-?)?0*(\d{1,9})$/i);
   const where: Prisma.PropertyWhereInput = {
-    ...(filters.includeDeleted ? {} : live),
+    ...(filters.deleted ? { deletedAt: { not: null } } : filters.includeDeleted ? {} : live),
     status: filters.status,
     listingType: filters.listingType,
     category: filters.category,
@@ -129,7 +130,7 @@ export async function listAdminPropertiesPage(filters: PropertyFilters) {
     orderBy: [...SORT_ORDER[filters.sort], { id: "desc" }], // id breaks ties so pages never overlap
     skip: (page - 1) * filters.pageSize,
     take: filters.pageSize,
-    select: { ...listingRowSelect, category: true, isFeatured: true },
+    select: { ...listingRowSelect, category: true, isFeatured: true, deletedAt: true },
   });
   return { rows, total, page, pageCount };
 }
@@ -157,8 +158,49 @@ export async function getPropertyForEdit(id: string) {
   return { ...property, media };
 }
 
-export function listInquiries() {
-  return prisma.inquiry.findMany({ orderBy: { createdAt: "desc" }, take: 100, select: inquiryRowSelect });
+/** One tab of the enquiries page, newest first. */
+export function listInquiries(view: InquiryView = "all") {
+  const statuses = INQUIRY_VIEWS[view].statuses;
+  return prisma.inquiry.findMany({
+    where: statuses ? { status: { in: [...statuses] } } : {},
+    orderBy: { createdAt: "desc" },
+    take: 200,
+    select: inquiryRowSelect,
+  });
+}
+
+/** Count per status, for the tab labels. */
+export async function countInquiriesByStatus() {
+  const rows = await prisma.inquiry.groupBy({ by: ["status"], _count: { _all: true } });
+  const counts: Record<InquiryStatus, number> = { NEW: 0, IN_PROGRESS: 0, CLOSED: 0, SPAM: 0 };
+  for (const row of rows) counts[row.status] = row._count._all;
+  return counts;
+}
+
+/** Everything the enquiry page shows. Null when the id doesn't exist. */
+export function getInquiry(id: string) {
+  return prisma.inquiry.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      type: true,
+      status: true,
+      name: true,
+      email: true,
+      phone: true,
+      message: true,
+      preferredViewingAt: true,
+      adminNotes: true,
+      respondedAt: true,
+      createdAt: true,
+      updatedAt: true,
+      userId: true,
+      assignedTo: { select: { name: true, email: true } },
+      property: {
+        select: { id: true, name: true, slug: true, refNumber: true, status: true, deletedAt: true, neighborhood: true, city: true, state: true },
+      },
+    },
+  });
 }
 
 export function listAmenities() {
@@ -166,6 +208,20 @@ export function listAmenities() {
     orderBy: [{ group: "asc" }, { name: "asc" }],
     select: { id: true, name: true, slug: true, group: true, _count: { select: { properties: true } } },
   });
+}
+
+/** Everyone with an account whose role includes admin, oldest first, plus how many other accounts exist. */
+export async function getTeam() {
+  const [candidates, total] = await Promise.all([
+    prisma.user.findMany({
+      where: { role: { contains: "admin" } },
+      orderBy: { createdAt: "asc" },
+      select: { id: true, name: true, email: true, image: true, role: true, banned: true, createdAt: true },
+    }),
+    prisma.user.count(),
+  ]);
+  const admins = candidates.filter(u => (u.role ?? "").split(",").some(r => r.trim() === "admin"));
+  return { admins, otherAccounts: total - admins.length };
 }
 
 export function countNewInquiries() {
