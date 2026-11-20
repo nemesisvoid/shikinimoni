@@ -8,7 +8,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
 /** Your name. Submitted by hand so React doesn't reset the field. */
-export function ProfileNameForm({ name }: { name: string }) {
+export function ProfileNameForm({
+  name,
+  hint = 'Shown in this admin and on enquiries you handle. Visitors never see it.',
+}: {
+  name: string;
+  hint?: string;
+}) {
   const [state, dispatch, pending] = useActionState<ProfileState, FormData>(updateProfile, { status: 'idle' });
   const [value, setValue] = useState(name);
 
@@ -31,7 +37,7 @@ export function ProfileNameForm({ name }: { name: string }) {
       <AdminField
         id='profile-name'
         label='Name'
-        hint='Shown in this admin and on enquiries you handle. Visitors never see it.'
+        hint={hint}
         error={error}>
         {field => (
           <Input

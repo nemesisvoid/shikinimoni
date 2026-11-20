@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { ChevronsUpDown, CircleUser, ExternalLink, House, LogOut } from "lucide-react";
 import { Logo } from "@/components/brand/logo";
-import { ADMIN_NAV } from "@/components/admin/nav";
+import { HOME_BY_AREA, NAV_BY_AREA, PROFILE_BY_AREA, type NavArea, type NavBadge } from "@/components/admin/nav";
 import { initialsFor } from "@/lib/format";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -35,7 +35,18 @@ import { authClient } from "@/lib/auth/client";
 
 export type AdminSidebarUser = { name: string; email: string; image: string | null };
 
-export function AdminSidebar({ user, newInquiries }: { user: AdminSidebarUser; newInquiries: number }) {
+const BADGE_SR: Record<NavBadge, string> = { newInquiries: " new", pendingReview: " to review", needsAttention: " need your attention" };
+
+/** The admin's and the agent's sidebar: same shell, different menu. */
+export function AdminSidebar({
+  user,
+  area = "admin",
+  badges = {},
+}: {
+  user: AdminSidebarUser;
+  area?: NavArea;
+  badges?: Partial<Record<NavBadge, number>>;
+}) {
   const pathname = usePathname();
   const { isMobile, setOpenMobile } = useSidebar();
 
@@ -57,7 +68,7 @@ export function AdminSidebar({ user, newInquiries }: { user: AdminSidebarUser; n
             <SidebarMenuButton
               tooltip="ShikiniMoni"
               className="hidden size-8! rounded-full! p-0! group-data-[collapsible=icon]:flex group-data-[collapsible=icon]:p-0!"
-              render={<Link href="/admin/dashboard" aria-label="ShikiniMoni admin home" />}
+              render={<Link href={HOME_BY_AREA[area]} aria-label={area === "admin" ? "ShikiniMoni admin home" : "Your agent dashboard"} />}
             >
               <span className="grid size-8 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground">
                 <House className="size-4" />
@@ -68,14 +79,15 @@ export function AdminSidebar({ user, newInquiries }: { user: AdminSidebarUser; n
       </SidebarHeader>
 
       <SidebarContent>
-        {ADMIN_NAV.map((group) => (
+        {NAV_BY_AREA[area].map((group) => (
           <SidebarGroup key={group.label}>
             <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 {group.items.map((item) => {
                   const active = isActive(item.href, item.exact);
-                  const badge = item.badge === "newInquiries" && newInquiries > 0 ? newInquiries : null;
+                  const count = item.badge ? (badges[item.badge] ?? 0) : 0;
+                  const badge = count > 0 ? count : null;
                   return (
                     <SidebarMenuItem key={item.href}>
                       <SidebarMenuButton
@@ -90,7 +102,7 @@ export function AdminSidebar({ user, newInquiries }: { user: AdminSidebarUser; n
                       {badge !== null && (
                         <SidebarMenuBadge className="bg-highlight text-highlight-foreground font-semibold tabular-nums">
                           {badge}
-                          <span className="sr-only"> new</span>
+                          <span className="sr-only">{item.badge ? BADGE_SR[item.badge] : ""}</span>
                         </SidebarMenuBadge>
                       )}
                     </SidebarMenuItem>
@@ -103,14 +115,15 @@ export function AdminSidebar({ user, newInquiries }: { user: AdminSidebarUser; n
       </SidebarContent>
 
       <SidebarFooter>
-        <UserMenu user={user} />
+        <UserMenu user={user} area={area} />
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>
   );
 }
 
-function UserMenu({ user }: { user: AdminSidebarUser }) {
+function UserMenu({ user, area }: { user: AdminSidebarUser; area: NavArea }) {
+  const fallbackName = area === "admin" ? "Admin" : "Agent";
   const router = useRouter();
   const { isMobile } = useSidebar();
 
@@ -136,7 +149,7 @@ function UserMenu({ user }: { user: AdminSidebarUser }) {
               </AvatarFallback>
             </Avatar>
             <span className="grid flex-1 text-left leading-tight">
-              <span className="truncate font-medium">{user.name || "Admin"}</span>
+              <span className="truncate font-medium">{user.name || fallbackName}</span>
               <span className="truncate text-xs text-muted-foreground">{user.email}</span>
             </span>
             <ChevronsUpDown className="ml-auto size-4" />
@@ -144,12 +157,12 @@ function UserMenu({ user }: { user: AdminSidebarUser }) {
           <DropdownMenuContent side={isMobile ? "bottom" : "right"} align="end" sideOffset={8} className="min-w-56">
             <DropdownMenuGroup>
               <DropdownMenuLabel className="font-normal">
-                <span className="block truncate text-sm font-medium">{user.name || "Admin"}</span>
+                <span className="block truncate text-sm font-medium">{user.name || fallbackName}</span>
                 <span className="block truncate text-xs text-muted-foreground">{user.email}</span>
               </DropdownMenuLabel>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
-            <DropdownMenuItem render={<Link href="/admin/profile" />}>
+            <DropdownMenuItem render={<Link href={PROFILE_BY_AREA[area]} />}>
               <CircleUser />
               Your profile
             </DropdownMenuItem>

@@ -31,6 +31,8 @@ export type SiteContact = {
   replyTime: string;
   /** Who gets new-enquiry alerts. Empty = the contact email. */
   alertEmails: string[];
+  /** Site-wide switch for "Listed by" on agents' listings. */
+  showAgentsOnListings: boolean;
 };
 
 /** Used until an admin saves Site settings for the first time. */
@@ -45,6 +47,7 @@ export const DEFAULT_CONTACT: SiteContact = {
   ],
   replyTime: "within one working day",
   alertEmails: [],
+  showAgentsOnListings: false,
 };
 
 /** "+234 800 000 0000" → "2348000000000". */

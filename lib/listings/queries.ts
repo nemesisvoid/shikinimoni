@@ -14,8 +14,9 @@ import type { ListingCardData, ListingDetail } from './types';
 
 const LIVE = { status: 'PUBLISHED', deletedAt: null } satisfies Prisma.PropertyWhereInput;
 
+// pendingReview: an agent's upload to a live listing that an admin hasn't approved yet.
 const COVER = {
-  where: { type: 'IMAGE' },
+  where: { type: 'IMAGE', pendingReview: false },
   orderBy: [{ isCover: 'desc' }, { sortOrder: 'asc' }],
   take: 1,
   select: { url: true, altText: true },
@@ -181,19 +182,20 @@ export async function getListing(slug: string): Promise<ListingDetail | null> {
       publishedAt: true,
       updatedAt: true,
       media: {
-        where: { type: 'IMAGE' },
+        where: { type: 'IMAGE', pendingReview: false },
         orderBy: [{ isCover: 'desc' }, { sortOrder: 'asc' }],
         select: { id: true, url: true, altText: true, width: true, height: true },
       },
       // Only documents the admin marked "show to buyers". Files stay private; the
       // page asks getDocumentLink() for a short-lived link when someone opens one.
-      documents: { where: { isPublic: true }, orderBy: { createdAt: 'asc' }, select: { id: true, name: true, type: true } },
+      documents: { where: { isPublic: true, pendingReview: false }, orderBy: { createdAt: 'asc' }, select: { id: true, name: true, type: true } },
       amenities: { select: { amenity: { select: { name: true, group: true } } } },
+      agent: { select: { status: true, showOnListings: true, photoUrl: true, user: { select: { name: true } } } },
     },
   });
   if (!row) return null;
 
-  const { media, amenities, serviceCharge, latitude, longitude, showExactAddress, addressLine1, addressLine2, postalCode, country, ...rest } = row;
+  const { media, amenities, agent, serviceCharge, latitude, longitude, showExactAddress, addressLine1, addressLine2, postalCode, country, ...rest } = row;
   const card = toCard({ ...rest, media: media.slice(0, 1) });
 
   const groups = new Map<string, string[]>();
@@ -229,6 +231,10 @@ export async function getListing(slug: string): Promise<ListingDetail | null> {
       .map(([group, items]) => ({ group, items: items.sort((a, b) => a.localeCompare(b)) })),
     publishedAt: rest.publishedAt,
     updatedAt: rest.updatedAt,
+    agent:
+      agent && agent.status === 'ACTIVE' && agent.showOnListings && agent.photoUrl && agent.user.name.trim()
+        ? { name: agent.user.name.trim(), photoUrl: agent.photoUrl }
+        : null,
   };
 }
 

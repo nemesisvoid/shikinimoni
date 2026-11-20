@@ -107,6 +107,11 @@ export function propertyObjectKey(propertyId: string, contentType: string) {
   return `properties/${propertyId}/${randomUUID()}.${EXTENSIONS[contentType] ?? "bin"}`;
 }
 
+/** agents/<userId>/<random>.<ext>: an agent's profile photo, in the public media bucket. */
+export function agentObjectKey(userId: string, contentType: string) {
+  return `agents/${userId}/${randomUUID()}.${EXTENSIONS[contentType] ?? "bin"}`;
+}
+
 /** Public URL of a photo. Only the media bucket has one. */
 export function publicUrlFor(key: string) {
   const base = mediaPublicUrl();

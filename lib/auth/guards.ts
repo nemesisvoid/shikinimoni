@@ -114,8 +114,8 @@ export async function assertAdmin(): Promise<SessionUser> {
 }
 
 /**
- * For admin PAGES. Signed out → sign-in page (then back here); signed in but not
- * an admin → 404, so the admin area doesn't advertise itself. Call it at the top
+ * For admin PAGES. Signed out → sign-in page (then back here); an agent → their
+ * own dashboard; anyone else → 404, so the admin area doesn't advertise itself. Call it at the top
  * of every admin page: layouts don't re-run on client navigation, so a check in
  * the admin layout alone isn't enough.
  */
@@ -123,6 +123,8 @@ export async function requireAdminPage(returnTo: string): Promise<SessionUser> {
   const result = await checkAdmin();
   if ("code" in result) {
     if (result.code === "UNAUTHORIZED") redirect(`/auth/sign-in?redirectTo=${encodeURIComponent(returnTo)}`);
+    const agent = await checkAgent();
+    if ("user" in agent) redirect("/agent");
     notFound();
   }
   return result.user;
@@ -145,4 +147,104 @@ export async function requireAdmin(): Promise<GuardResult> {
     return { ok: false, response: Response.json({ error: AUTHORIZATION_MESSAGES[result.code] }, { status }) };
   }
   return { ok: true, user: result.user };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Agent guards. An agent is an account with an ACTIVE row in `agents` (set up
+// through an invite), not a Neon Auth role, so suspending one takes effect on
+// their next request. Admins are never treated as agents.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type AgentProfile = { status: "ACTIVE" | "SUSPENDED"; phone: string | null; photoUrl: string | null; showOnListings: boolean };
+
+type AgentCheck =
+  | { user: SessionUser; agent: AgentProfile }
+  | { code: AuthorizationCode | "SUSPENDED" };
+
+async function checkAgent(): Promise<AgentCheck> {
+  const session = await getCurrentUser();
+  if (!session) return { code: "UNAUTHORIZED" };
+  const row = await prisma.user.findUnique({
+    where: { id: session.id },
+    select: {
+      name: true,
+      role: true,
+      banned: true,
+      agent: { select: { status: true, phone: true, photoUrl: true, showOnListings: true } },
+    },
+  });
+  if (!row || row.banned) return { code: "UNAUTHORIZED" };
+  if (!row.agent) return { code: "FORBIDDEN" };
+  if (row.agent.status !== "ACTIVE") return { code: "SUSPENDED" };
+  return { user: { ...session, name: row.name, role: row.role, banned: row.banned } as SessionUser, agent: row.agent };
+}
+
+/**
+ * For agent PAGES. Signed out → sign-in; an admin → the admin dashboard; a
+ * suspended agent → the "account paused" page; anyone else → 404.
+ */
+export async function requireAgentPage(returnTo: string): Promise<{ user: SessionUser; agent: AgentProfile }> {
+  const result = await checkAgent();
+  if ("code" in result) {
+    if (result.code === "UNAUTHORIZED") redirect(`/auth/sign-in?redirectTo=${encodeURIComponent(returnTo)}`);
+    if (result.code === "SUSPENDED") redirect("/account/paused");
+    if (await currentUserIsAdmin()) redirect("/admin/dashboard");
+    notFound();
+  }
+  return result;
+}
+
+/** For agent Server Actions. Returns the agent, or throws AuthorizationError. */
+export async function assertAgent(): Promise<SessionUser> {
+  const result = await checkAgent();
+  if ("code" in result) throw new AuthorizationError(result.code === "UNAUTHORIZED" ? "UNAUTHORIZED" : "FORBIDDEN");
+  return result.user;
+}
+
+/** Where a signed-in person belongs: the admin, the agent area, or the site. */
+export async function homeForCurrentUser(): Promise<"/admin/dashboard" | "/agent" | "/account/paused" | "/" | null> {
+  const admin = await checkAdmin();
+  if ("user" in admin) return "/admin/dashboard";
+  if (admin.code === "UNAUTHORIZED") return null;
+  const agent = await checkAgent();
+  if ("user" in agent) return "/agent";
+  if (agent.code === "SUSPENDED") return "/account/paused";
+  return "/";
+}
+
+/**
+ * Who may change a listing, and how. Admins change any listing directly. An
+ * agent may change only their own: a draft directly, a live one by proposing
+ * changes that wait for review. Nobody but an admin touches a listing that's
+ * waiting for review, rejected, archived or deleted.
+ */
+export type EditAccess =
+  | { ok: true; user: SessionUser; isAdmin: true; mode: "direct" }
+  | { ok: true; user: SessionUser; isAdmin: false; mode: "direct" | "pending" }
+  | { ok: false; error: string };
+
+export async function checkEditAccess(propertyId: string): Promise<EditAccess> {
+  const admin = await checkAdmin();
+  if ("user" in admin) return { ok: true, user: admin.user, isAdmin: true, mode: "direct" };
+  const agent = await checkAgent();
+  if ("code" in agent) throw new AuthorizationError(agent.code === "UNAUTHORIZED" ? "UNAUTHORIZED" : "FORBIDDEN");
+
+  const property = await prisma.property.findFirst({
+    where: { id: propertyId, deletedAt: null },
+    select: { agentId: true, status: true },
+  });
+  if (!property || property.agentId !== agent.user.id) return { ok: false, error: "That property no longer exists." };
+  if (property.status === "DRAFT") return { ok: true, user: agent.user, isAdmin: false, mode: "direct" };
+  if (property.status === "PUBLISHED") return { ok: true, user: agent.user, isAdmin: false, mode: "pending" };
+  if (property.status === "PENDING_REVIEW") {
+    return { ok: false, error: "This listing is waiting for review. Withdraw it first if you need to change it." };
+  }
+  return { ok: false, error: "This listing can’t be changed any more." };
+}
+
+/** For account actions both admins and agents use (name, password). Throws for anyone else. */
+export async function assertStaff(): Promise<SessionUser> {
+  const admin = await checkAdmin();
+  if ("user" in admin) return admin.user;
+  return assertAgent();
 }

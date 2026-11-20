@@ -2,7 +2,8 @@
 
 import { revalidatePath, updateTag } from 'next/cache';
 import * as z from 'zod';
-import { assertAdmin, currentUserIsAdmin } from '@/lib/auth/guards';
+import { checkEditAccess, currentUserIsAdmin, getCurrentUser } from '@/lib/auth/guards';
+import { mergePendingChanges } from '@/lib/listings/pending';
 import { prisma } from '@/lib/db';
 import { LISTINGS_TAG } from '@/lib/listings/tags';
 import {
@@ -32,13 +33,14 @@ const NOT_CONFIGURED = "Document storage isn't set up yet, so documents can't be
  * Documents go to the PRIVATE bucket; nothing there has a public URL.
  */
 export async function requestDocumentUploads(input: unknown): Promise<Result<{ key: string; uploadUrl: string }[]>> {
-  await assertAdmin();
-
-  if (!isStorageConfigured('documents')) return { ok: false, error: NOT_CONFIGURED };
-
   const parsed = RequestDocumentUploadsSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: firstError(parsed.error) };
   const { propertyId, files } = parsed.data;
+  // Admins, or the listing's own agent. Throws for anyone else.
+  const access = await checkEditAccess(propertyId);
+  if (!access.ok) return { ok: false, error: access.error };
+
+  if (!isStorageConfigured('documents')) return { ok: false, error: NOT_CONFIGURED };
 
   const property = await prisma.property.findFirst({
     where: { id: propertyId, deletedAt: null },
@@ -66,13 +68,15 @@ export async function requestDocumentUploads(input: unknown): Promise<Result<{ k
 export async function attachPropertyDocuments(
   input: unknown,
 ): Promise<Result<{ documents: { id: string; storageKey: string }[] }>> {
-  const admin = await assertAdmin();
-
-  if (!isStorageConfigured('documents')) return { ok: false, error: NOT_CONFIGURED };
-
   const parsed = AttachDocumentsSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: firstError(parsed.error) };
   const { propertyId, documents } = parsed.data;
+  const access = await checkEditAccess(propertyId);
+  if (!access.ok) return { ok: false, error: access.error };
+  // An agent adding documents to a live listing: stored, but hidden until approved.
+  const pending = access.mode === 'pending';
+
+  if (!isStorageConfigured('documents')) return { ok: false, error: NOT_CONFIGURED };
 
   const prefix = `properties/${propertyId}/`;
   if (documents.some((d) => !d.storageKey.startsWith(prefix) || d.storageKey.includes('..'))) {
@@ -117,11 +121,11 @@ export async function attachPropertyDocuments(
       mimeType: infos[i]!.contentType,
       sizeBytes: infos[i]!.sizeBytes,
       isPublic: doc.isPublic,
-      uploadedById: admin.id,
+      pendingReview: pending,
+      uploadedById: access.user.id,
     })),
   });
-  revalidatePath('/admin', 'layout');
-  updateTag(LISTINGS_TAG); // photos and shared documents show on the public property page
+  revalidateFor(pending);
   return { ok: true, data: { documents: created } };
 }
 
@@ -130,11 +134,11 @@ export async function attachPropertyDocuments(
  * removed documents from the database and the private bucket.
  */
 export async function arrangePropertyDocuments(input: unknown): Promise<Result<null>> {
-  await assertAdmin();
-
   const parsed = ArrangeDocumentsSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: firstError(parsed.error) };
   const { propertyId, documents, removedIds } = parsed.data;
+  const access = await checkEditAccess(propertyId);
+  if (!access.ok) return { ok: false, error: access.error };
   const keepIds = documents.map((d) => d.id);
   if (removedIds.some((id) => keepIds.includes(id))) {
     return { ok: false, error: 'A document is marked both kept and removed.' };
@@ -142,10 +146,27 @@ export async function arrangePropertyDocuments(input: unknown): Promise<Result<n
 
   const owned = await prisma.propertyDocument.findMany({
     where: { propertyId, id: { in: [...keepIds, ...removedIds] } },
-    select: { id: true, storageKey: true },
+    select: { id: true, storageKey: true, pendingReview: true },
   });
   if (owned.length !== keepIds.length + removedIds.length) {
     return { ok: false, error: 'Some documents changed since this page loaded. Refresh the page and try again.' };
+  }
+
+  if (access.mode === 'pending') {
+    // A live listing: remember the agent's list for review. Only their own
+    // pending uploads are deleted now; live documents stay until approval.
+    const dropped = owned.filter((d) => removedIds.includes(d.id) && d.pendingReview);
+    if (dropped.length > 0) {
+      await prisma.propertyDocument.deleteMany({ where: { id: { in: dropped.map((d) => d.id) } } });
+      if (isStorageConfigured('documents')) {
+        await deleteObjects('documents', dropped.map((d) => d.storageKey)).catch((error) => console.error('Document cleanup failed:', error));
+      }
+    }
+    await mergePendingChanges(propertyId, {
+      documents: documents.map((d) => ({ id: d.id, name: d.name, type: d.type, isPublic: d.isPublic })),
+    });
+    revalidateFor(true);
+    return { ok: true, data: null };
   }
 
   await prisma.$transaction([
@@ -153,7 +174,7 @@ export async function arrangePropertyDocuments(input: unknown): Promise<Result<n
     ...documents.map((doc) =>
       prisma.propertyDocument.update({
         where: { id: doc.id },
-        data: { name: doc.name, type: doc.type, isPublic: doc.isPublic },
+        data: { name: doc.name, type: doc.type, isPublic: doc.isPublic, pendingReview: false },
       }),
     ),
   ]);
@@ -163,14 +184,21 @@ export async function arrangePropertyDocuments(input: unknown): Promise<Result<n
     await deleteObjects('documents', removedKeys).catch((error) => console.error('Document cleanup failed:', error));
   }
 
-  revalidatePath('/admin', 'layout');
-  updateTag(LISTINGS_TAG); // photos and shared documents show on the public property page
+  revalidateFor(false);
   return { ok: true, data: null };
 }
 
+/** Pending uploads only show in the agent area and the review queue; anything else can show on the site. */
+function revalidateFor(pending: boolean) {
+  revalidatePath('/admin', 'layout');
+  revalidatePath('/agent', 'layout');
+  if (!pending) updateTag(LISTINGS_TAG); // shared documents show on the public property page
+}
+
 /**
- * A 5-minute link to open one document. Admins can open any document; everyone
- * else only documents marked "show to buyers" on a published, live listing.
+ * A 5-minute link to open one document. Admins can open any document, an agent
+ * the documents on their own listings, and everyone else only documents marked
+ * "show to buyers" on a published, live listing (never one still pending review).
  */
 export async function getDocumentLink(input: unknown): Promise<Result<{ url: string }>> {
   const parsed = MediaIdSchema.safeParse(input);
@@ -183,14 +211,18 @@ export async function getDocumentLink(input: unknown): Promise<Result<{ url: str
       storageKey: true,
       mimeType: true,
       isPublic: true,
-      property: { select: { status: true, deletedAt: true } },
+      pendingReview: true,
+      property: { select: { status: true, deletedAt: true, agentId: true } },
     },
   });
   // Same answer for "missing" and "not allowed", so private documents can't be probed.
   if (!doc) return { ok: false, error: 'Document not found.' };
 
-  const visibleToPublic = doc.isPublic && doc.property.status === 'PUBLISHED' && doc.property.deletedAt === null;
-  if (!visibleToPublic && !(await currentUserIsAdmin())) return { ok: false, error: 'Document not found.' };
+  const visibleToPublic = doc.isPublic && !doc.pendingReview && doc.property.status === 'PUBLISHED' && doc.property.deletedAt === null;
+  if (!visibleToPublic && !(await currentUserIsAdmin())) {
+    const user = doc.property.agentId ? await getCurrentUser() : null;
+    if (!user || user.id !== doc.property.agentId) return { ok: false, error: 'Document not found.' };
+  }
 
   if (!isStorageConfigured('documents')) return { ok: false, error: NOT_CONFIGURED };
   const extension = doc.mimeType === 'application/pdf' ? '.pdf' : doc.mimeType === 'image/png' ? '.png' : '.jpg';

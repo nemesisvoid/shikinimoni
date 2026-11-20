@@ -40,6 +40,8 @@ model User {
   inquiries         Inquiry[]          @relation("InquirySender")
   inquiriesAssigned Inquiry[]          @relation("InquiryAssignee")
   auditLogs         AuditLog[]
+  agent             Agent?             @relation("AgentAccount")
+  agentsInvited     AgentInvite[]      @relation("AgentInviteSender")
 
   @@map("user")
   @@schema("neon_auth")
@@ -101,8 +103,12 @@ enum ListingType {
 /// Editorial state: only PUBLISHED listings are visible to the public.
 enum ListingStatus {
   DRAFT
+  /// An agent submitted it; an admin approves (publishes), sends it back (draft) or rejects it.
+  PENDING_REVIEW
   PUBLISHED
   ARCHIVED
+  /// An admin turned down an agent's submission. Kept for the record; it can't be resubmitted.
+  REJECTED
 
   @@schema("public")
 }
@@ -193,6 +199,10 @@ enum AuditAction {
   PUBLISH
   UNPUBLISH
   STATUS_CHANGE
+  SUBMIT
+  APPROVE
+  SEND_BACK
+  REJECT
 
   @@schema("public")
 }
@@ -266,6 +276,19 @@ model Property {
   /// Soft delete: admins can restore; public queries must filter `deletedAt: null`.
   deletedAt   DateTime? @db.Timestamptz(3)
 
+  /// The agent who owns this listing. Null = a company listing.
+  agentId String? @db.Uuid
+  agent   Agent?  @relation(fields: [agentId], references: [userId], onDelete: SetNull)
+
+  // Agent review. submittedAt: waiting for an admin (a new listing in PENDING_REVIEW,
+  // or pendingChanges to a live one). reviewNote: the admin's note when sending back or rejecting.
+  submittedAt    DateTime? @db.Timestamptz(3)
+  reviewNote     String?   @db.VarChar(1000)
+  reviewedAt     DateTime? @db.Timestamptz(3)
+  /// An agent's edits to a live listing, applied only when an admin approves them:
+  /// { values, photos?: [{ id, altText }], documents?: [{ id, name, type, isPublic }] }.
+  pendingChanges Json?
+
   createdById String? @db.Uuid
   createdBy   User?   @relation("PropertyCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   updatedById String? @db.Uuid
@@ -288,6 +311,8 @@ model Property {
   @@index([isFeatured, publishedAt(sort: Desc)])
   @@index([createdById])
   @@index([updatedById])
+  @@index([agentId])
+  @@index([submittedAt])
   @@map("properties")
   @@schema("public")
 }
@@ -309,22 +334,24 @@ model PropertyViewDay {
 /// Photos, videos, floor plans and tour links. Files live in object storage;
 /// the database stores the storage key (for deletes) and a public URL.
 model PropertyMedia {
-  id         String    @id @default(uuid(7)) @db.Uuid
-  propertyId String    @db.Uuid
-  type       MediaType @default(IMAGE)
+  id            String    @id @default(uuid(7)) @db.Uuid
+  propertyId    String    @db.Uuid
+  type          MediaType @default(IMAGE)
   /// Object-storage key. Null for external links (e.g. a YouTube video or 3D tour).
-  storageKey String?   @unique @db.VarChar(512)
-  url        String    @db.Text
-  altText    String?   @db.VarChar(200)
-  caption    String?   @db.VarChar(300)
-  mimeType   String?   @db.VarChar(100)
-  sizeBytes  Int?
-  width      Int?
-  height     Int?
-  sortOrder  Int       @default(0)
+  storageKey    String?   @unique @db.VarChar(512)
+  url           String    @db.Text
+  altText       String?   @db.VarChar(200)
+  caption       String?   @db.VarChar(300)
+  mimeType      String?   @db.VarChar(100)
+  sizeBytes     Int?
+  width         Int?
+  height        Int?
+  sortOrder     Int       @default(0)
   /// Exactly one cover per property: enforce in the same transaction that sets it.
-  isCover    Boolean   @default(false)
-  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+  isCover       Boolean   @default(false)
+  /// Uploaded by an agent as part of changes to a live listing: hidden until an admin approves.
+  pendingReview Boolean   @default(false)
+  createdAt     DateTime  @default(now()) @db.Timestamptz(3)
 
   property     Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   uploadedById String?  @db.Uuid
@@ -339,15 +366,17 @@ model PropertyMedia {
 /// Title documents, survey plans, approvals. Private by default (admin-only);
 /// serve private files through signed URLs, never a public bucket URL.
 model PropertyDocument {
-  id         String       @id @default(uuid(7)) @db.Uuid
-  propertyId String       @db.Uuid
-  type       DocumentType
-  name       String       @db.VarChar(200)
-  storageKey String       @unique @db.VarChar(512)
-  mimeType   String?      @db.VarChar(100)
-  sizeBytes  Int?
-  isPublic   Boolean      @default(false)
-  createdAt  DateTime     @default(now()) @db.Timestamptz(3)
+  id            String       @id @default(uuid(7)) @db.Uuid
+  propertyId    String       @db.Uuid
+  type          DocumentType
+  name          String       @db.VarChar(200)
+  storageKey    String       @unique @db.VarChar(512)
+  mimeType      String?      @db.VarChar(100)
+  sizeBytes     Int?
+  isPublic      Boolean      @default(false)
+  /// Uploaded by an agent as part of changes to a live listing: hidden until an admin approves.
+  pendingReview Boolean      @default(false)
+  createdAt     DateTime     @default(now()) @db.Timestamptz(3)
 
   property     Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
   uploadedById String?  @db.Uuid
@@ -473,20 +502,73 @@ model AuditLog {
 /// first time the site uses the defaults in lib/site.ts. Read it through
 /// lib/site-settings.ts, which caches it and fills the gaps.
 model SiteSettings {
-  id            Int      @id @default(1)
-  contactEmail  String   @db.VarChar(254)
-  phone         String   @db.VarChar(40)
-  whatsapp      String   @db.VarChar(40)
+  id                   Int      @id @default(1)
+  contactEmail         String   @db.VarChar(254)
+  phone                String   @db.VarChar(40)
+  whatsapp             String   @db.VarChar(40)
   /// One line per row, e.g. "Lekki Phase 1\nLagos, Nigeria".
-  officeAddress String   @db.VarChar(300)
+  officeAddress        String   @db.VarChar(300)
   /// [{ "days": "Monday to Friday", "time": "9am to 6pm" }, ...]
-  openingHours  Json
+  openingHours         Json
   /// Finishes "We reply …", e.g. "within one working day".
-  replyTime     String   @db.VarChar(60)
+  replyTime            String   @db.VarChar(60)
   /// Who gets new-enquiry alerts, comma-separated. Empty = the contact email.
-  alertEmails   String?  @db.VarChar(1000)
-  updatedAt     DateTime @updatedAt @db.Timestamptz(3)
+  alertEmails          String?  @db.VarChar(1000)
+  /// "Listed by" name and photo on agents' listings. Each agent can also be hidden on their own.
+  showAgentsOnListings Boolean  @default(false)
+  updatedAt            DateTime @updatedAt @db.Timestamptz(3)
 
   @@map("site_settings")
+  @@schema("public")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Agents
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum AgentStatus {
+  ACTIVE
+  /// Can't use the agent area. Their live listings stay up.
+  SUSPENDED
+
+  @@schema("public")
+}
+
+/// An account that can add listings for review. Joined through an AgentInvite.
+model Agent {
+  userId         String      @id @db.Uuid
+  user           User        @relation("AgentAccount", fields: [userId], references: [id], onDelete: Cascade)
+  status         AgentStatus @default(ACTIVE)
+  /// For the team to reach them. Never shown on the site.
+  phone          String?     @db.VarChar(40)
+  photoUrl       String?     @db.Text
+  photoKey       String?     @db.VarChar(512)
+  /// Per-agent switch for "Listed by" (the site-wide one is in SiteSettings).
+  showOnListings Boolean     @default(true)
+  createdAt      DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime    @updatedAt @db.Timestamptz(3)
+
+  properties Property[]
+
+  @@map("agents")
+  @@schema("public")
+}
+
+/// A personal sign-up link for one email address. Only a hash of the token is stored.
+model AgentInvite {
+  id         String    @id @default(uuid(7)) @db.Uuid
+  email      String    @db.VarChar(254)
+  name       String    @db.VarChar(120)
+  tokenHash  String    @unique @db.Char(64)
+  expiresAt  DateTime  @db.Timestamptz(3)
+  acceptedAt DateTime? @db.Timestamptz(3)
+  revokedAt  DateTime? @db.Timestamptz(3)
+  createdAt  DateTime  @default(now()) @db.Timestamptz(3)
+
+  invitedById String? @db.Uuid
+  invitedBy   User?   @relation("AgentInviteSender", fields: [invitedById], references: [id], onDelete: SetNull)
+
+  @@index([email])
+  @@map("agent_invites")
   @@schema("public")
 }

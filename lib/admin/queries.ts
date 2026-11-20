@@ -27,7 +27,7 @@ const listingRowSelect = {
   city: true,
   state: true,
   updatedAt: true,
-  media: { where: { isCover: true }, take: 1, select: { url: true, altText: true } },
+  media: { where: { isCover: true, pendingReview: false }, take: 1, select: { url: true, altText: true } },
 } as const;
 
 const inquiryRowSelect = {
@@ -103,6 +103,7 @@ export async function listAdminPropertiesPage(filters: PropertyFilters) {
   const where: Prisma.PropertyWhereInput = {
     ...(filters.deleted ? { deletedAt: { not: null } } : filters.includeDeleted ? {} : live),
     status: filters.status,
+    ...(filters.agent ? { agentId: filters.agent } : {}),
     listingType: filters.listingType,
     category: filters.category,
     type: filters.type,
@@ -130,7 +131,13 @@ export async function listAdminPropertiesPage(filters: PropertyFilters) {
     orderBy: [...SORT_ORDER[filters.sort], { id: "desc" }], // id breaks ties so pages never overlap
     skip: (page - 1) * filters.pageSize,
     take: filters.pageSize,
-    select: { ...listingRowSelect, category: true, isFeatured: true, deletedAt: true },
+    select: {
+      ...listingRowSelect,
+      category: true,
+      isFeatured: true,
+      deletedAt: true,
+      agent: { select: { user: { select: { name: true, email: true } } } },
+    },
   });
   return { rows, total, page, pageCount };
 }
@@ -144,18 +151,21 @@ export async function getPropertyForEdit(id: string) {
       media: {
         where: { type: "IMAGE" },
         orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
-        select: { id: true, url: true, altText: true, isCover: true },
+        select: { id: true, url: true, altText: true, isCover: true, pendingReview: true },
       },
       documents: {
         orderBy: { createdAt: "asc" },
-        select: { id: true, name: true, type: true, isPublic: true, mimeType: true, sizeBytes: true },
+        select: { id: true, name: true, type: true, isPublic: true, mimeType: true, sizeBytes: true, pendingReview: true },
       },
+      agent: { select: { userId: true, user: { select: { name: true, email: true } } } },
     },
   });
   if (!property) return null;
+  // The live photos and documents; an agent's pending uploads stay out of the form.
   // The form treats the first photo as the cover, so make sure it is first.
-  const media = [...property.media].sort((a, b) => Number(b.isCover) - Number(a.isCover));
-  return { ...property, media };
+  const media = property.media.filter((m) => !m.pendingReview).sort((a, b) => Number(b.isCover) - Number(a.isCover));
+  const documents = property.documents.filter((d) => !d.pendingReview);
+  return { ...property, media, documents, allMedia: property.media, allDocuments: property.documents };
 }
 
 /** One tab of the enquiries page, newest first. */
@@ -222,6 +232,64 @@ export async function getTeam() {
   ]);
   const admins = candidates.filter(u => (u.role ?? "").split(",").some(r => r.trim() === "admin"));
   return { admins, otherAccounts: total - admins.length };
+}
+
+/** Agent submissions waiting for an admin: new listings and changes to live ones. */
+export function countPendingReview() {
+  return prisma.property.count({ where: { submittedAt: { not: null }, deletedAt: null, status: { in: ["PENDING_REVIEW", "PUBLISHED"] } } });
+}
+
+/** The review queue, oldest first so nothing waits too long. */
+export function listPendingReview() {
+  return prisma.property.findMany({
+    where: { submittedAt: { not: null }, deletedAt: null, status: { in: ["PENDING_REVIEW", "PUBLISHED"] } },
+    orderBy: { submittedAt: "asc" },
+    select: {
+      id: true,
+      name: true,
+      refNumber: true,
+      status: true,
+      submittedAt: true,
+      neighborhood: true,
+      city: true,
+      state: true,
+      media: { where: { isCover: true, pendingReview: false }, take: 1, select: { url: true } },
+      agent: { select: { userId: true, photoUrl: true, user: { select: { name: true, email: true } } } },
+    },
+  });
+}
+
+/** Admin → Agents: everyone with agent access, their listing counts, and open invites. */
+export async function getAgentsOverview() {
+  const [agents, counts, invites] = await Promise.all([
+    prisma.agent.findMany({
+      orderBy: { createdAt: "asc" },
+      select: {
+        userId: true,
+        status: true,
+        phone: true,
+        photoUrl: true,
+        showOnListings: true,
+        createdAt: true,
+        user: { select: { name: true, email: true } },
+      },
+    }),
+    prisma.property.groupBy({ by: ["agentId", "status"], where: { agentId: { not: null }, deletedAt: null }, _count: { _all: true } }),
+    prisma.agentInvite.findMany({
+      where: { acceptedAt: null, revokedAt: null },
+      orderBy: { createdAt: "desc" },
+      select: { id: true, email: true, name: true, expiresAt: true, createdAt: true, invitedBy: { select: { name: true, email: true } } },
+    }),
+  ]);
+  const countFor = (agentId: string, status: ListingStatus) => counts.find((c) => c.agentId === agentId && c.status === status)?._count._all ?? 0;
+  return {
+    agents: agents.map((a) => ({
+      ...a,
+      listings: { live: countFor(a.userId, "PUBLISHED"), pending: countFor(a.userId, "PENDING_REVIEW"), drafts: countFor(a.userId, "DRAFT") },
+    })),
+    // Worked out here rather than while rendering.
+    invites: invites.map((i) => ({ ...i, expired: i.expiresAt.getTime() < Date.now() })),
+  };
 }
 
 export function countNewInquiries() {

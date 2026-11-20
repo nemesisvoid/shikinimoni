@@ -22,6 +22,8 @@ export const LISTING_STATUS_META: Record<ListingStatus, { label: string; classNa
   PUBLISHED: { label: "Published", className: "bg-plum-50 text-plum-800 ring-plum-200" },
   DRAFT: { label: "Draft", className: "bg-ink-100 text-ink-700 ring-ink-200" },
   ARCHIVED: { label: "Archived", className: "bg-background text-muted-foreground ring-border" },
+  PENDING_REVIEW: { label: "Waiting for review", className: "bg-sunset-100 text-sunset-900 ring-sunset-200" },
+  REJECTED: { label: "Rejected", className: "bg-destructive/10 text-destructive ring-destructive/20" },
 };
 
 export const INQUIRY_STATUS_META: Record<InquiryStatus, { label: string; className: string }> = {

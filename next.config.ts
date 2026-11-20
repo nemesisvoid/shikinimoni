@@ -20,7 +20,7 @@ const nextConfig: NextConfig = {
         pathname: "/photo-*",
         search: "?auto=format&fit=crop&w=1600&q=75",
       },
-      ...(r2PublicUrl ? [new URL(`${r2PublicUrl}/properties/**`)] : []),
+      ...(r2PublicUrl ? [new URL(`${r2PublicUrl}/properties/**`), new URL(`${r2PublicUrl}/agents/**`)] : []),
     ],
   },
   partialPrefetching: true,

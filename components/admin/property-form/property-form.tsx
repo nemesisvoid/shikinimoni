@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type BaseSyntheticEvent } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { arrangePropertyDocuments } from '@/actions/document.action';
 import { arrangePropertyPhotos } from '@/actions/media.action';
+import { proposeChanges, saveAgentDraft, submitChangesForReview, submitForReview } from '@/actions/agent-property.action';
 import { createProperty, updateProperty } from '@/actions/property.action';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Controller, FormProvider, useForm, useFormContext, useWatch, type FieldErrors, type Resolver } from 'react-hook-form';
@@ -90,6 +91,11 @@ const EDIT_STATUS_CHOICES: Choice[] = [
   ...STATUS_CHOICES,
   { value: 'ARCHIVED', label: 'Archived', hint: 'Off the site, kept for records' },
 ];
+/** Shown only while an agent's listing is in one of these states. */
+const REVIEW_STATUS_CHOICES: Record<string, Choice> = {
+  PENDING_REVIEW: { value: 'PENDING_REVIEW', label: 'Waiting for review', hint: 'Submitted by the agent. Use the review panel, or publish it here' },
+  REJECTED: { value: 'REJECTED', label: 'Rejected', hint: 'Turned down; not on the site' },
+};
 const CURRENCY_OPTIONS = Object.fromEntries(Object.entries(CURRENCIES).map(([code, c]) => [code, c.label]));
 const STATE_OPTIONS = Object.fromEntries(NIGERIAN_STATES.map(s => [s, s]));
 const sqmFormatter = new Intl.NumberFormat('en-NG', { maximumFractionDigits: 2 });
@@ -111,11 +117,32 @@ export type ExistingProperty = {
 };
 
 /**
+ * Who's using the form. Admins save and publish directly. Agents save drafts and
+ * submit them for review; on a live listing they propose changes, which wait for
+ * an admin while the live listing stays as it is.
+ */
+export type PropertyFormMode = { kind: 'admin' } | { kind: 'agent'; live: boolean };
+
+/**
  * Create and edit form. Without `property` it creates a listing; with it, it
  * edits that listing, including its saved photos and documents.
  */
-export function PropertyForm({ amenities, property }: { amenities: AmenityOption[]; property?: ExistingProperty }) {
+export function PropertyForm({
+  amenities,
+  property,
+  mode = { kind: 'admin' },
+}: {
+  amenities: AmenityOption[];
+  property?: ExistingProperty;
+  mode?: PropertyFormMode;
+}) {
   const isEditing = property !== undefined;
+  const isAgent = mode.kind === 'agent';
+  const agentLive = mode.kind === 'agent' && mode.live;
+  const listHref = isAgent ? '/agent/properties' : '/admin/properties';
+  // Agents choose at the button: save the draft, or save and submit it. Read from
+  // the button that submitted the form; Enter in a field saves the draft.
+  const [intent, setIntent] = useState<'save' | 'submit'>('submit');
   const form = useForm<PropertyFormValues, unknown, CreatePropertyInput>({
     resolver,
     defaultValues: property?.values ?? EMPTY_PROPERTY,
@@ -208,7 +235,10 @@ export function PropertyForm({ amenities, property }: { amenities: AmenityOption
   const slugPreview = slugify(name || '') || 'your-property-name';
 
   // ── Submit ───────────────────────────────────────────────────────────────
-  const onValid = async () => {
+  const onValid = async (_data: CreatePropertyInput, event?: BaseSyntheticEvent) => {
+    const submitter = (event?.nativeEvent as SubmitEvent | undefined)?.submitter;
+    const chosen: 'save' | 'submit' = isAgent && !agentLive && submitter?.getAttribute('data-intent') !== 'submit' ? 'save' : 'submit';
+    setIntent(chosen);
     setSubmitError(null);
     setSavedNotice(false);
     if (documents.some(d => d.name.trim() === '')) {
@@ -224,7 +254,13 @@ export function PropertyForm({ amenities, property }: { amenities: AmenityOption
     try {
       // Send the raw values: the server validates them with the same schema.
       const values = toSchemaInput(getValues());
-      const result = propertyId ? await updateProperty({ id: propertyId, values }) : await createProperty(values);
+      const result = !isAgent
+        ? propertyId
+          ? await updateProperty({ id: propertyId, values })
+          : await createProperty(values)
+        : agentLive
+          ? await proposeChanges({ id: propertyId, values })
+          : await saveAgentDraft({ id: propertyId, values });
       if (!result.ok) {
         setStage('idle');
         if (!showServerErrors(result.fieldErrors)) setSubmitError({ message: result.error, filesOnly: false });
@@ -313,10 +349,32 @@ export function PropertyForm({ amenities, property }: { amenities: AmenityOption
     setFilesDirty(false);
     setProgress(1);
 
-    // 4. New listing → the property list. Edit → stay here with a notice.
+    // 4. Agents: send it to the team if that's what they asked for.
+    if (isAgent && chosen === 'submit') {
+      try {
+        const sent = agentLive ? await submitChangesForReview(id) : await submitForReview(id);
+        if (!sent.ok) {
+          setStage('idle');
+          setSubmitError({ message: `Your work is saved, but it wasn’t sent for review: ${sent.error}`, filesOnly: false });
+          // Stay on this form (so the message stays visible); the address now points at the saved draft.
+          if (!isEditing) window.history.replaceState(null, '', `/agent/properties/${id}`);
+          return;
+        }
+      } catch {
+        setStage('idle');
+        setSubmitError({ message: 'Your work is saved, but it wasn’t sent for review. Check your connection and try again.', filesOnly: false });
+        return;
+      }
+      setStage('done');
+      router.push(listHref);
+      router.refresh();
+      return;
+    }
+
+    // 5. New listing → the list (an agent's new draft → its own page). Edit → stay here with a notice.
     if (!isEditing) {
       setStage('done');
-      router.push('/admin/properties');
+      router.push(isAgent ? `/agent/properties/${id}` : listHref);
     } else {
       setStage('idle');
       setSavedNotice(true);
@@ -339,7 +397,8 @@ export function PropertyForm({ amenities, property }: { amenities: AmenityOption
   };
 
   const isBusy = formState.isSubmitting || stage === 'done';
-  const createdButIncomplete = !isEditing && propertyId !== null;
+  // A new listing whose details saved but whose files didn't: the button retries the upload.
+  const createdButIncomplete = !isEditing && propertyId !== null && submitError?.filesOnly === true;
   const submitLabel =
     stage === 'saving'
       ? 'Saving…'
@@ -349,11 +408,15 @@ export function PropertyForm({ amenities, property }: { amenities: AmenityOption
           ? 'Saved'
           : createdButIncomplete
             ? 'Retry upload'
-            : isEditing
-              ? 'Save changes'
-              : status === 'PUBLISHED'
-                ? 'Publish property'
-                : 'Save draft';
+            : isAgent
+              ? agentLive
+                ? 'Submit changes for review'
+                : 'Submit for review'
+              : isEditing
+                ? 'Save changes'
+                : status === 'PUBLISHED'
+                  ? 'Publish property'
+                  : 'Save draft';
 
   const errorCount = countErrors(formState.errors);
   const sectionHasError = (fields: readonly string[]) => fields.some(f => f in formState.errors);
@@ -755,23 +818,37 @@ export function PropertyForm({ amenities, property }: { amenities: AmenityOption
         <aside className='flex flex-col gap-6 xl:sticky xl:top-6'>
           <FormSection
             id='publishing'
-            title='Publishing'>
-            <ChoiceField
-              name='status'
-              legend='Visibility'
-              choices={isEditing ? EDIT_STATUS_CHOICES : STATUS_CHOICES}
-              className='grid-cols-1'
-            />
+            title={isAgent ? 'Review' : 'Publishing'}>
+            {isAgent ? (
+              <p className='text-sm text-muted-foreground'>
+                {agentLive
+                  ? 'The live listing stays as it is until the team approves your changes.'
+                  : 'Only you and the team can see drafts. When it’s ready, submit it and the team will check it before it goes live.'}
+              </p>
+            ) : (
+              <ChoiceField
+                name='status'
+                legend='Visibility'
+                choices={
+                  isEditing
+                    ? [...EDIT_STATUS_CHOICES, ...(REVIEW_STATUS_CHOICES[serverStatus ?? ''] ? [REVIEW_STATUS_CHOICES[serverStatus!]] : [])]
+                    : STATUS_CHOICES
+                }
+                className='grid-cols-1'
+              />
+            )}
             <SelectField
               name='availability'
               label='Availability'
               options={AVAILABILITY_LABEL}
               description='Change it later when the property goes under offer or sells.'
             />
-            <SwitchField
-              name='isFeatured'
-              label='Feature on the home page'
-            />
+            {!isAgent && (
+              <SwitchField
+                name='isFeatured'
+                label='Feature on the home page'
+              />
+            )}
 
             {errorCount > 0 && formState.isSubmitted && (
               <p
@@ -839,25 +916,47 @@ export function PropertyForm({ amenities, property }: { amenities: AmenityOption
                   aria-hidden
                   className='mt-0.5 size-4 shrink-0'
                 />
-                <span>{status === 'PUBLISHED' ? 'Published.' : 'Draft saved.'} Opening your properties…</span>
+                <span>
+                  {isAgent
+                    ? intent === 'submit'
+                      ? 'Sent for review. Opening your listings…'
+                      : 'Draft saved. Opening it…'
+                    : `${status === 'PUBLISHED' ? 'Published.' : 'Draft saved.'} Opening your properties…`}
+                </span>
               </div>
             )}
 
             <div className='flex flex-col gap-2'>
+              {/* For agents' drafts "Save draft" comes first in the markup, so pressing
+                  Enter in a field saves rather than submits; CSS order shows it second. */}
+              {isAgent && !agentLive && !createdButIncomplete && (
+                <Button
+                  type='submit'
+                  size='lg'
+                  variant='outline'
+                  data-intent='save'
+                  className='order-2'
+                  disabled={isBusy}>
+                  {formState.isSubmitting && intent === 'save' && <Loader2 aria-hidden className='animate-spin' />}
+                  Save draft
+                </Button>
+              )}
               <Button
                 type='submit'
                 size='lg'
+                data-intent='submit'
+                className='order-1'
                 disabled={isBusy}
                 aria-live='polite'>
-                {formState.isSubmitting && <Loader2 aria-hidden className='animate-spin' />}
+                {formState.isSubmitting && intent === 'submit' && <Loader2 aria-hidden className='animate-spin' />}
                 {submitLabel}
               </Button>
               <Link
-                href='/admin/properties'
+                href={listHref}
                 aria-disabled={isBusy}
                 tabIndex={isBusy ? -1 : undefined}
-                className={cn(buttonVariants({ variant: 'ghost', size: 'lg' }), isBusy && 'pointer-events-none opacity-50')}>
-                {createdButIncomplete ? 'Continue without the files' : isEditing ? 'Back to properties' : 'Cancel'}
+                className={cn(buttonVariants({ variant: 'ghost', size: 'lg' }), 'order-3', isBusy && 'pointer-events-none opacity-50')}>
+                {createdButIncomplete ? 'Continue without the files' : isEditing ? (isAgent ? 'Back to your listings' : 'Back to properties') : 'Cancel'}
               </Link>
             </div>
           </FormSection>

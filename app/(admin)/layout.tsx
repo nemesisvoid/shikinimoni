@@ -7,7 +7,7 @@ import { SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Toaster } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { countNewInquiries } from '@/lib/admin/queries';
+import { countNewInquiries, countPendingReview } from '@/lib/admin/queries';
 import { requireAdminPage } from '@/lib/auth/guards';
 
 export const metadata: Metadata = {
@@ -32,7 +32,7 @@ export default function AdminLayout({ children }: LayoutProps<'/'>) {
 
 async function AdminShell({ children }: { children: React.ReactNode }) {
   const admin = await requireAdminPage('/admin/dashboard');
-  const [cookieStore, newInquiries] = await Promise.all([cookies(), countNewInquiries()]);
+  const [cookieStore, newInquiries, pendingReview] = await Promise.all([cookies(), countNewInquiries(), countPendingReview()]);
   // shadcn's sidebar remembers open/collapsed in this cookie.
   const defaultOpen = cookieStore.get('sidebar_state')?.value !== 'false';
 
@@ -41,7 +41,7 @@ async function AdminShell({ children }: { children: React.ReactNode }) {
       <SidebarProvider defaultOpen={defaultOpen}>
         <AdminSidebar
           user={{ name: admin.name, email: admin.email, image: admin.image ?? null }}
-          newInquiries={newInquiries}
+          badges={{ newInquiries, pendingReview }}
         />
         <SidebarInset>
           <AdminTopbar />
