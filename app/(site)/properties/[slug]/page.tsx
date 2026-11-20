@@ -15,6 +15,7 @@ import {
   PropertyTitle,
   TitlePapers,
 } from '@/components/listing/property-sections';
+import { ViewBeacon } from '@/components/listing/view-beacon';
 import { Skeleton } from '@/components/ui/skeleton';
 import { getListing, getListingSitemap, getSimilarListings } from '@/lib/listings/queries';
 import { listingJsonLd, listingMetadata, safeJson } from '@/lib/listings/seo';
@@ -93,6 +94,7 @@ async function PropertyView({ params }: { params: PageProps<'/properties/[slug]'
       </Suspense>
 
       <MobileEnquiryBar listing={listing} />
+      <ViewBeacon propertyId={listing.id} />
     </>
   );
 }
