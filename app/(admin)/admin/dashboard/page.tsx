@@ -2,6 +2,7 @@ import { Suspense } from 'react';
 import { AdminPageSkeleton } from '@/components/admin/page-skeleton';
 import Link from 'next/link';
 import { Plus } from 'lucide-react';
+import { DashboardTrends, TopListings } from '@/components/admin/dashboard-trends';
 import { AvailabilityBreakdown } from '@/components/admin/availability-breakdown';
 import { InquiriesList } from '@/components/admin/inquiries-list';
 import { AdminPageHeader, AdminPanel } from '@/components/admin/page-header';
@@ -9,6 +10,7 @@ import { PropertiesTable } from '@/components/admin/properties-table';
 import { StatStrip } from '@/components/admin/stat-strip';
 import { buttonVariants } from '@/components/ui/button';
 import { getDashboardData } from '@/lib/admin/queries';
+import { getDashboardTrends, parseTrendRange } from '@/lib/admin/trends';
 import { requireAdminPage } from '@/lib/auth/guards';
 
 export const metadata = { title: 'Dashboard' };
@@ -20,17 +22,18 @@ const viewAll = (href: string, label: string) => (
 );
 
 /** The session check and data load stream into the skeleton, so navigating here is instant. */
-export default function AdminDashboardPage() {
+export default function AdminDashboardPage(props: PageProps<'/admin/dashboard'>) {
   return (
     <Suspense fallback={<AdminPageSkeleton />}>
-      <AdminDashboardPageContent />
+      <AdminDashboardPageContent {...props} />
     </Suspense>
   );
 }
 
-async function AdminDashboardPageContent() {
+async function AdminDashboardPageContent({ searchParams }: PageProps<'/admin/dashboard'>) {
   const admin = await requireAdminPage('/admin/dashboard');
-  const data = await getDashboardData();
+  const range = parseTrendRange((await searchParams).range);
+  const [data, trends] = await Promise.all([getDashboardData(), getDashboardTrends(range)]);
   const firstName = admin.name?.trim().split(/\s+/)[0];
 
   return (
@@ -75,21 +78,26 @@ async function AdminDashboardPageContent() {
         ]}
       />
 
+      <DashboardTrends trends={trends} />
+
       {/* minmax(0,1fr) lets the column shrink below the table's width so the table scrolls inside its panel. */}
       <div className='grid grid-cols-[minmax(0,1fr)] items-start gap-6 xl:grid-cols-[minmax(0,1fr)_23rem]'>
-        <AdminPanel
-          title='Recently updated'
-          description='The last listings you or your team changed'
-          action={viewAll('/admin/properties', 'All properties')}
-        >
-          {data.recentListings.length > 0 ? (
-            <div className='border-t'>
-              <PropertiesTable rows={data.recentListings} compact />
-            </div>
-          ) : (
-            <p className='px-5 pb-5 text-sm text-muted-foreground'>No listings yet. Add your first property to see it here.</p>
-          )}
-        </AdminPanel>
+        <div className='flex min-w-0 flex-col gap-6'>
+          <AdminPanel
+            title='Recently updated'
+            description='The last listings you or your team changed'
+            action={viewAll('/admin/properties', 'All properties')}
+          >
+            {data.recentListings.length > 0 ? (
+              <div className='border-t'>
+                <PropertiesTable rows={data.recentListings} compact />
+              </div>
+            ) : (
+              <p className='px-5 pb-5 text-sm text-muted-foreground'>No listings yet. Add your first property to see it here.</p>
+            )}
+          </AdminPanel>
+          <TopListings trends={trends} />
+        </div>
 
         <div className='flex flex-col gap-6'>
           <AdminPanel title='Published by availability' description='How your live stock is moving'>

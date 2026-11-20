@@ -1,4 +1,4 @@
-import { Building2, CircleUser, LayoutDashboard, MessageSquareText, PlusCircle, Settings, Sparkles, Users, type LucideIcon } from "lucide-react";
+import { Building2, CircleUser, History, LayoutDashboard, MessageSquareText, PlusCircle, Settings, Sparkles, Users, type LucideIcon } from "lucide-react";
 
 export type AdminNavItem = {
   href: string;
@@ -31,6 +31,7 @@ export const ADMIN_NAV: { label: string; items: AdminNavItem[] }[] = [
     items: [
       { href: "/admin/settings", label: "Site settings", icon: Settings },
       { href: "/admin/team", label: "Team", icon: Users },
+      { href: "/admin/activity", label: "Activity log", icon: History },
       { href: "/admin/profile", label: "Your profile", icon: CircleUser },
     ],
   },
@@ -48,4 +49,5 @@ export const ADMIN_SEGMENT_LABELS: Record<string, string> = {
   settings: "Site settings",
   team: "Team",
   profile: "Your profile",
+  activity: "Activity log",
 };

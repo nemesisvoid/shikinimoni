@@ -45,6 +45,11 @@ async function EditPropertyPageContent({ params }: PageProps<'/admin/properties/
             <ListingStatusBadge status={property.status} />
             <span>Ref PRP-{String(property.refNumber).padStart(5, '0')}</span>
             <span>Updated {formatRelativeTime(property.updatedAt)}</span>
+            <Link
+              href={`/admin/activity?property=${property.id}`}
+              className='underline decoration-border underline-offset-4 hover:text-foreground hover:decoration-foreground'>
+              See history
+            </Link>
           </span>
         }
         actions={

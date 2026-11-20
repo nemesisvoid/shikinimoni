@@ -276,6 +276,7 @@ model Property {
   amenities PropertyAmenity[]
   favorites Favorite[]
   inquiries Inquiry[]
+  viewDays  PropertyViewDay[]
 
   // Public search: published, live listings, newest first
   @@index([status, deletedAt, publishedAt(sort: Desc)])
@@ -288,6 +289,20 @@ model Property {
   @@index([createdById])
   @@index([updatedById])
   @@map("properties")
+  @@schema("public")
+}
+
+/// Page views per listing per day (Lagos time), for the dashboard trends.
+/// Counts only: no IP address, cookie or visitor id is stored.
+model PropertyViewDay {
+  propertyId String   @db.Uuid
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  day        DateTime @db.Date
+  views      Int      @default(0)
+
+  @@id([propertyId, day])
+  @@index([day])
+  @@map("property_view_days")
   @@schema("public")
 }
 
