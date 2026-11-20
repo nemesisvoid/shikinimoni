@@ -19,12 +19,13 @@ import {
  */
 
 export const ACTIVITY_AREAS = {
-  all: { label: "Everything", entityType: null },
-  listings: { label: "Listings", entityType: "Property" },
-  enquiries: { label: "Enquiries", entityType: "Inquiry" },
-  amenities: { label: "Amenities", entityType: "Amenity" },
-  team: { label: "Team and profiles", entityType: "User" },
-  settings: { label: "Site settings", entityType: "SiteSettings" },
+  all: { label: "Everything", entityTypes: null },
+  listings: { label: "Listings", entityTypes: ["Property"] },
+  enquiries: { label: "Enquiries", entityTypes: ["Inquiry"] },
+  agents: { label: "Agents", entityTypes: ["Agent", "AgentInvite"] },
+  amenities: { label: "Amenities", entityTypes: ["Amenity"] },
+  team: { label: "Team and profiles", entityTypes: ["User"] },
+  settings: { label: "Site settings", entityTypes: ["SiteSettings"] },
 } as const;
 export type ActivityArea = keyof typeof ACTIVITY_AREAS;
 
@@ -72,9 +73,9 @@ export type ActivityEntry = {
 };
 
 export async function getActivity(filters: ActivityFilters) {
-  const entityType = filters.property ? "Property" : ACTIVITY_AREAS[filters.area].entityType;
+  const entityTypes = filters.property ? ["Property"] : ACTIVITY_AREAS[filters.area].entityTypes;
   const where: Prisma.AuditLogWhereInput = {
-    ...(entityType ? { entityType } : {}),
+    ...(entityTypes ? { entityType: { in: [...entityTypes] } } : {}),
     ...(filters.property ? { entityId: filters.property } : {}),
     ...(filters.who ? { actorId: filters.who } : {}),
   };
@@ -152,7 +153,7 @@ async function lookUpNames(rows: Row[]) {
     prisma.property.findMany({ where: { id: { in: idsOf("Property") } }, select: { id: true, name: true, deletedAt: true } }),
     prisma.inquiry.findMany({ where: { id: { in: idsOf("Inquiry") } }, select: { id: true, name: true, property: { select: { name: true } } } }),
     prisma.amenity.findMany({ where: { id: { in: [...amenityIds].filter(Number.isInteger) } }, select: { id: true, name: true } }),
-    prisma.user.findMany({ where: { id: { in: idsOf("User") } }, select: { id: true, name: true, email: true } }),
+    prisma.user.findMany({ where: { id: { in: [...idsOf("User"), ...idsOf("Agent")] } }, select: { id: true, name: true, email: true } }),
   ]);
   return {
     property: new Map(properties.map((p) => [p.id, p])),
@@ -191,6 +192,18 @@ function describe(
         target: { label: "site settings", href: "/admin/settings" },
         details: fieldDetails(changes, SETTINGS_FIELDS),
       };
+    case "Agent":
+      return { ...base, ...describeAgent(row.action, row.entityId, row.actor?.id, changes, names) };
+    case "AgentInvite":
+      return row.action === "CREATE"
+        ? {
+            ...base,
+            before: "invited",
+            target: { label: String(changes.name ?? changes.email ?? "someone"), href: "/admin/agents" },
+            after: `(${String(changes.email ?? "")}) to join as an agent`,
+            details: [],
+          }
+        : { ...base, before: "cancelled an agent invite", details: [] };
     default:
       return { ...base, before: `${row.action.toLowerCase().replace("_", " ")} ${row.entityType}`, details: [] };
   }
@@ -203,9 +216,28 @@ function describeProperty(action: AuditAction, id: string, changes: Changes, nam
   const label = live?.name ?? (typeof changes.name === "string" ? changes.name : isFromTo(changes.name) ? String(changes.name.to) : "a listing");
   const target = { label: `“${label}”`, href: live && !live.deletedAt ? `/admin/properties/${id}` : undefined };
   const status = isFromTo(changes.status) ? changes.status : null;
-  const details = action === "UPDATE" || action === "PUBLISH" || action === "UNPUBLISH" ? fieldDetails(changes, PROPERTY_FIELDS, names) : [];
+  const details =
+    action === "UPDATE" || action === "PUBLISH" || action === "UNPUBLISH" || action === "APPROVE" ? fieldDetails(changes, PROPERTY_FIELDS, names) : [];
+  const note = typeof changes.note === "string" ? [{ label: "Note to the agent", note: changes.note }] : [];
+  const isChanges = !status && "changes" in changes;
 
   switch (action) {
+    case "SUBMIT":
+      return isChanges
+        ? { before: "submitted changes to", target, after: "for review", details: [] }
+        : { before: "submitted", target, after: "for review", details: [] };
+    case "APPROVE":
+      return isChanges || !status
+        ? { before: "approved the changes to", target, details: details.filter((d) => d.label !== "Status") }
+        : { before: "approved and published", target, details: [] };
+    case "SEND_BACK":
+      return isChanges
+        ? { before: "sent the changes to", target, after: "back to the agent", details: note }
+        : { before: "sent", target, after: "back to the agent", details: note };
+    case "REJECT":
+      return isChanges
+        ? { before: "rejected the changes to", target, details: note }
+        : { before: "rejected", target, details: note };
     case "CREATE":
       return { before: "added", target, after: changes.status === "PUBLISHED" ? "and published it" : "as a draft", details: [] };
     case "PUBLISH":
@@ -218,6 +250,7 @@ function describeProperty(action: AuditAction, id: string, changes: Changes, nam
         details: details.filter((d) => d.label !== "Status"),
       };
     case "STATUS_CHANGE":
+      if (changes.withdrawn) return { before: "withdrew", target, after: "from review", details: [] };
       return status?.to === "ARCHIVED"
         ? { before: "archived", target, details: [] }
         : { before: "moved", target, after: `to ${statusLabel(status?.to)}`, details: [] };
@@ -227,9 +260,38 @@ function describeProperty(action: AuditAction, id: string, changes: Changes, nam
         : { before: "deleted", target: { label: target.label }, details: [] };
     case "RESTORE":
       return { before: "restored", target, after: status?.to === "DRAFT" ? "as a draft" : undefined, details: [] };
-    default:
+    default: {
+      if (changes.changes === "discarded") return { before: "discarded their changes to", target, details: [] };
+      const keys = Object.keys(changes);
+      if (keys.length === 1 && isFromTo(changes.availability)) {
+        return { before: "marked", target, after: `as ${enumLabel(AVAILABILITY_LABEL)(changes.availability.to).toLowerCase()}`, details: [] };
+      }
+      if (changes.draft === "saved") return { before: "saved", target, after: "as a draft", details: [] };
       return { before: "edited", target, details };
+    }
   }
+}
+
+function describeAgent(action: AuditAction, id: string, actorId: string | undefined, changes: Changes, names: Names): Described {
+  const self = id === actorId;
+  const label = names.user.get(id) || (typeof changes.name === "string" && changes.name) || (typeof changes.email === "string" ? changes.email : "an agent");
+  const target = { label: String(label), href: "/admin/agents" };
+  if (action === "CREATE") return { before: "joined as an agent", details: [] };
+  if (action === "DELETE") {
+    const n = Number(changes.listings) || 0;
+    return { before: "removed", target, after: `as an agent${n ? ` (their ${n} listing${n === 1 ? "" : "s"} moved to the company)` : ""}`, details: [] };
+  }
+  if (action === "STATUS_CHANGE" && isFromTo(changes.status)) {
+    return changes.status.to === "SUSPENDED" ? { before: "suspended", target, details: [] } : { before: "reactivated", target, details: [] };
+  }
+  if (isFromTo(changes.showOnListings)) {
+    return changes.showOnListings.to
+      ? { before: "showed", target, after: "on their listings", details: [] }
+      : { before: "hid", target, after: "on their listings", details: [] };
+  }
+  if (changes.photo) return self ? { before: changes.photo === "removed" ? "removed their photo" : "changed their photo", details: [] } : { before: "changed the photo for", target, details: [] };
+  if (isFromTo(changes.phone)) return { before: self ? "updated their phone number" : "updated the phone number for", target: self ? undefined : target, details: [] };
+  return { before: "updated", target, details: [] };
 }
 
 function describeInquiry(action: AuditAction, id: string, changes: Changes, names: Names): Described {
@@ -351,6 +413,7 @@ const SETTINGS_FIELDS: Record<string, FieldSpec> = {
   },
   replyTime: { label: "Reply time" },
   alertEmails: { label: "Enquiry alerts go to" },
+  showAgentsOnListings: { label: "Agents on listings", format: (v) => (v === true ? "Shown" : v === false ? "Hidden" : text(v)) },
 };
 
 const AMENITY_FIELDS: Record<string, FieldSpec> = {
@@ -359,6 +422,11 @@ const AMENITY_FIELDS: Record<string, FieldSpec> = {
 };
 
 const humanise = (key: string) => key.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (c) => c.toUpperCase());
+
+/** Field-by-field changes to a listing, worded as in the activity log. Used by the review panel too. */
+export function describePropertyChanges(changes: Record<string, unknown>, amenityNames: Map<number, string>): ActivityDetail[] {
+  return fieldDetails(changes, PROPERTY_FIELDS, { amenity: amenityNames } as Names);
+}
 
 function fieldDetails(changes: Changes, fields: Record<string, FieldSpec>, names?: Names): ActivityDetail[] {
   const details: ActivityDetail[] = [];
@@ -371,6 +439,10 @@ function fieldDetails(changes: Changes, fields: Record<string, FieldSpec>, names
       const removed = [...from].filter((id) => !to.has(id)).map(name);
       const note = [added.length && `added ${added.join(", ")}`, removed.length && `removed ${removed.join(", ")}`].filter(Boolean).join("; ");
       details.push({ label: "Amenities", note: note || "updated" });
+      continue;
+    }
+    if ((key === "photos" || key === "documents") && typeof value === "string") {
+      details.push({ label: key === "photos" ? "Photos" : "Documents", note: value });
       continue;
     }
     if (!isFromTo(value)) continue;

@@ -2,14 +2,14 @@ import { Suspense } from 'react';
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 import { Skeleton } from '@/components/ui/skeleton';
-import { getCurrentUser } from '@/lib/auth/guards';
+import { homeForCurrentUser } from '@/lib/auth/guards';
 
 // Account screens have nothing worth showing in search results.
 export const metadata: Metadata = { robots: { index: false, follow: false } };
 
 /**
  * Sign-in and sign-up are for signed-out visitors only: anyone with a session
- * is sent to the home page. The session check runs per request, so it streams
+ * is sent to their own home (the admin, the agent area, or the site). The session check runs per request, so it streams
  * inside Suspense.
  */
 export default function AuthLayout({ children }: LayoutProps<'/auth'>) {
@@ -21,7 +21,8 @@ export default function AuthLayout({ children }: LayoutProps<'/auth'>) {
 }
 
 async function SignedOutOnly({ children }: { children: React.ReactNode }) {
-  if (await getCurrentUser()) redirect('/');
+  const home = await homeForCurrentUser();
+  if (home) redirect(home);
   return children;
 }
 

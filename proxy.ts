@@ -1,6 +1,6 @@
 import { auth } from '@/lib/auth/server';
 
-// Runs only on the admin area (see `matcher`): signed-out visitors are sent to
+// Runs only on the admin and agent areas (see `matcher`): signed-out visitors are sent to
 // sign-in, and the session is refreshed on the way through. Everything else is
 // a public site, so the proxy stays out of the way and an unknown URL shows the
 // normal 404 page instead of a sign-in prompt.
@@ -12,5 +12,5 @@ import { auth } from '@/lib/auth/server';
 export default auth.middleware({ loginUrl: '/auth/sign-in' });
 
 export const config = {
-  matcher: ['/admin', '/admin/:path*'],
+  matcher: ['/admin', '/admin/:path*', '/agent', '/agent/:path*'],
 };

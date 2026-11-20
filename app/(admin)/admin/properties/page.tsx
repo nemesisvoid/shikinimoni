@@ -1,13 +1,14 @@
 import { Suspense } from 'react';
 import { AdminPageSkeleton } from '@/components/admin/page-skeleton';
 import Link from 'next/link';
-import { Plus } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 import { AdminEmptyState, AdminPageHeader } from '@/components/admin/page-header';
 import { PropertiesDataTable } from '@/components/admin/properties-data-table';
 import { DEFAULT_PAGE_SIZE, DEFAULT_SORT, type AdminPropertyRow, type PropertyTableQuery } from '@/lib/admin/property-table';
 import { buttonVariants } from '@/components/ui/button';
 import { listAdminPropertiesPage } from '@/lib/admin/queries';
 import { requireAdminPage } from '@/lib/auth/guards';
+import { prisma } from '@/lib/db';
 import { PropertyFiltersSchema } from '@/schemas/property.schema';
 
 export const metadata = { title: 'Properties' };
@@ -37,7 +38,12 @@ async function AdminPropertiesPageContent({ searchParams }: PageProps<'/admin/pr
   };
 
   const { rows, total, page } = await listAdminPropertiesPage(filters);
-  const hasFilters = Boolean(filters.q || filters.status || filters.listingType || filters.category || filters.availability || filters.deleted);
+  const hasFilters = Boolean(
+    filters.q || filters.status || filters.listingType || filters.category || filters.availability || filters.deleted || filters.agent,
+  );
+  const agent = filters.agent
+    ? await prisma.user.findUnique({ where: { id: filters.agent }, select: { name: true, email: true } })
+    : null;
 
   const addButton = (
     <Link
@@ -71,6 +77,7 @@ async function AdminPropertiesPageContent({ searchParams }: PageProps<'/admin/pr
     category: filters.category,
     availability: filters.availability,
     deleted: filters.deleted || undefined,
+    agent: filters.agent,
     sort: filters.sort,
     page,
     pageSize: filters.pageSize,
@@ -94,6 +101,7 @@ async function AdminPropertiesPageContent({ searchParams }: PageProps<'/admin/pr
     updatedAt: p.updatedAt.toISOString(),
     coverUrl: p.media[0]?.url ?? null,
     deletedAt: p.deletedAt?.toISOString() ?? null,
+    agentName: p.agent ? p.agent.user.name || p.agent.user.email : null,
   }));
 
   return (
@@ -107,6 +115,23 @@ async function AdminPropertiesPageContent({ searchParams }: PageProps<'/admin/pr
         }
         actions={addButton}
       />
+      {filters.agent && (
+        <p className='flex flex-wrap items-center gap-2 text-sm'>
+          <span className='text-muted-foreground'>Showing listings by</span>
+          <span className='inline-flex items-center gap-1 rounded-full border bg-card py-1 pr-1 pl-3 font-medium'>
+            {agent ? agent.name || agent.email : 'a removed agent'}
+            <Link
+              href='/admin/properties'
+              aria-label='Show all properties'
+              className='rounded-full p-1 text-muted-foreground hover:bg-muted hover:text-foreground'>
+              <X
+                aria-hidden
+                className='size-3.5'
+              />
+            </Link>
+          </span>
+        </p>
+      )}
       <PropertiesDataTable
         rows={tableRows}
         total={total}

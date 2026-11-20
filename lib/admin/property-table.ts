@@ -35,6 +35,8 @@ export type AdminPropertyRow = {
   coverUrl: string | null;
   /** ISO date when it was moved to Deleted; null for live rows. */
   deletedAt: string | null;
+  /** The agent who owns it; null for company listings. */
+  agentName: string | null;
 };
 
 /** Everything that lives in the URL. */
@@ -46,6 +48,8 @@ export type PropertyTableQuery = {
   availability?: Availability;
   /** The Deleted view: only properties moved to Deleted. */
   deleted?: boolean;
+  /** One agent's listings (their user id). */
+  agent?: string;
   sort: PropertySort;
   page: number;
   pageSize: number;

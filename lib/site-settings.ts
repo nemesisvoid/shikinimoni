@@ -29,6 +29,7 @@ export async function readSiteContact(): Promise<SiteContact> {
     hours: parseHours(row.openingHours),
     replyTime: row.replyTime,
     alertEmails: splitEmails(row.alertEmails ?? ''),
+    showAgentsOnListings: row.showAgentsOnListings,
   };
 }
 

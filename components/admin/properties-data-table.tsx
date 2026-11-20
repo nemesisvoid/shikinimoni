@@ -80,6 +80,7 @@ function hrefFor(query: PropertyTableQuery) {
   if (query.category) params.set('category', query.category);
   if (query.availability) params.set('availability', query.availability);
   if (query.deleted) params.set('deleted', 'true');
+  if (query.agent) params.set('agent', query.agent);
   if (query.sort !== DEFAULT_SORT) params.set('sort', query.sort);
   if (query.page > 1) params.set('page', String(query.page));
   if (query.pageSize !== DEFAULT_PAGE_SIZE) params.set('pageSize', String(query.pageSize));
@@ -489,7 +490,10 @@ function PropertyCell({ row }: { row: AdminPropertyRow }) {
             )}
           </Link>
         )}
-        <p className='max-w-[20rem] truncate text-xs text-muted-foreground'>{row.location || 'No location yet'}</p>
+        <p className='max-w-[20rem] truncate text-xs text-muted-foreground'>
+          {row.location || 'No location yet'}
+          {row.agentName && ` · Agent: ${row.agentName}`}
+        </p>
       </div>
     </div>
   );

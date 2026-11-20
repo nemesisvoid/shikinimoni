@@ -7,9 +7,11 @@ import { ListingStatusBadge } from '@/components/admin/badges';
 import { AdminPageHeader } from '@/components/admin/page-header';
 import { PropertyActions } from '@/components/admin/property-actions';
 import { PropertyForm } from '@/components/admin/property-form/property-form';
+import { ReviewPanel } from '@/components/admin/review-panel';
 import { toFormValues } from '@/components/admin/property-form/values';
 import { buttonVariants } from '@/components/ui/button';
 import { getPropertyForEdit, listAmenities } from '@/lib/admin/queries';
+import { getReviewSummary } from '@/lib/admin/review';
 import { requireAdminPage } from '@/lib/auth/guards';
 import { formatRelativeTime } from '@/lib/format';
 import { propertyPath } from '@/lib/listings/search';
@@ -35,6 +37,7 @@ async function EditPropertyPageContent({ params }: PageProps<'/admin/properties/
 
   const [property, amenities] = await Promise.all([getPropertyForEdit(id), listAmenities()]);
   if (!property) notFound();
+  const review = await getReviewSummary(property);
 
   return (
     <>
@@ -45,6 +48,13 @@ async function EditPropertyPageContent({ params }: PageProps<'/admin/properties/
             <ListingStatusBadge status={property.status} />
             <span>Ref PRP-{String(property.refNumber).padStart(5, '0')}</span>
             <span>Updated {formatRelativeTime(property.updatedAt)}</span>
+            {property.agent && (
+              <Link
+                href={`/admin/properties?agent=${property.agent.userId}`}
+                className='underline decoration-border underline-offset-4 hover:text-foreground hover:decoration-foreground'>
+                Agent: {property.agent.user.name || property.agent.user.email}
+              </Link>
+            )}
             <Link
               href={`/admin/activity?property=${property.id}`}
               className='underline decoration-border underline-offset-4 hover:text-foreground hover:decoration-foreground'>
@@ -77,6 +87,19 @@ async function EditPropertyPageContent({ params }: PageProps<'/admin/properties/
           </>
         }
       />
+      {(review?.kind === 'new' || review?.kind === 'changes') && (
+        <ReviewPanel
+          {...review}
+          propertyId={property.id}
+          submitted={formatRelativeTime(review.submittedAt)}
+        />
+      )}
+      {review?.kind === 'changes-returned' && (
+        <p className='rounded-2xl border bg-muted/40 p-4 text-sm text-muted-foreground'>
+          {review.agentName}’s changes to this listing were sent back and are waiting for them.
+          {review.note && <span className='mt-1 block'>Your note: “{review.note}”</span>}
+        </p>
+      )}
       <PropertyForm
         amenities={amenities.map(({ id, name, group }) => ({ id, name, group }))}
         property={{

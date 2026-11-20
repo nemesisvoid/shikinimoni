@@ -4,6 +4,7 @@ import { revalidatePath, updateTag } from 'next/cache';
 import { assertAdmin } from '@/lib/auth/guards';
 import { prisma } from '@/lib/db';
 import { Prisma } from '@/lib/generated/prisma/client';
+import { LISTINGS_TAG } from '@/lib/listings/tags';
 import { readSiteContact, SITE_SETTINGS_TAG } from '@/lib/site-settings';
 import { parseFormData } from '@/schemas/form-data';
 import { SITE_SETTINGS_ARRAY_FIELDS, SiteSettingsSchema } from '@/schemas/settings.schema';
@@ -51,6 +52,47 @@ export async function saveSiteSettings(_prev: SiteSettingsState, formData: FormD
   updateTag(SITE_SETTINGS_TAG);
   revalidatePath('/', 'layout');
   return { status: 'saved', message: 'Site settings saved. The site shows them now.', savedAt: Date.now() };
+}
+
+/**
+ * The site-wide "Listed by" switch: agents' name and photo on their listings.
+ * Each agent can still be hidden on their own (Admin → Agents).
+ */
+export async function setShowAgentsOnListings(show: unknown): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
+  const admin = await assertAdmin();
+  const value = show === true;
+  try {
+    const before = await readSiteContact();
+    if (before.showAgentsOnListings === value) return { ok: true, message: 'Nothing changed.' };
+    // Before the first save of Site settings there's no row yet; start it from what the site shows now.
+    await prisma.siteSettings.upsert({
+      where: { id: 1 },
+      update: { showAgentsOnListings: value },
+      create: {
+        id: 1,
+        contactEmail: before.contactEmail,
+        phone: before.phone,
+        whatsapp: before.whatsapp,
+        officeAddress: before.officeLines.join('\n'),
+        openingHours: before.hours,
+        replyTime: before.replyTime,
+        alertEmails: before.alertEmails.join(', ') || null,
+        showAgentsOnListings: value,
+      },
+    });
+    await prisma.auditLog
+      .create({
+        data: { action: 'UPDATE', entityType: 'SiteSettings', entityId: '1', changes: { showAgentsOnListings: { from: !value, to: value } }, actorId: admin.id },
+      })
+      .catch(e => console.error('Audit log for setShowAgentsOnListings failed:', e));
+  } catch (error) {
+    console.error('setShowAgentsOnListings failed:', error);
+    return { ok: false, error: "That didn't save. Try again in a moment." };
+  }
+  updateTag(SITE_SETTINGS_TAG);
+  updateTag(LISTINGS_TAG);
+  revalidatePath('/', 'layout');
+  return { ok: true, message: value ? 'Agents now show on their listings.' : 'Agents no longer show on listings.' };
 }
 
 /** { phone: { from, to } } for the fields that changed. */

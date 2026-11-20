@@ -67,4 +67,9 @@ export type ListingDetail = ListingCardData & {
   amenities: { group: string; items: string[] }[];
   publishedAt: Date | null;
   updatedAt: Date;
+  /**
+   * The listing's agent, when they may be shown: active, switched on for listings,
+   * with a name and a photo. The site-wide switch (Site settings) is checked on the page.
+   */
+  agent: { name: string; photoUrl: string } | null;
 };

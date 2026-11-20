@@ -5,12 +5,15 @@ import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { authClient } from "@/lib/auth/client";
 
-/** Only allow same-origin relative paths as post-login destinations. */
+/**
+ * Only allow same-origin relative paths as post-login destinations. Without one,
+ * /account sends admins to the admin, agents to their dashboard, others home.
+ */
 function safeRedirect(): string {
-  const target = new URLSearchParams(window.location.search).get("redirectTo") ?? "/";
+  const target = new URLSearchParams(window.location.search).get("redirectTo") ?? "/account";
   return target.startsWith("/") && !target.startsWith("//") && !target.startsWith("/\\")
     ? target
-    : "/";
+    : "/account";
 }
 
 export function AuthForm({ mode }: { mode: "sign-in" | "sign-up" }) {

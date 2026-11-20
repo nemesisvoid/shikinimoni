@@ -1,3 +1,4 @@
+import Image from 'next/image';
 import Link from 'next/link';
 import {
   BedDouble,
@@ -383,6 +384,22 @@ export async function EnquiryCard({ listing }: { listing: ListingDetail }) {
         <p className='mt-4 rounded-xl bg-sunset-50 p-3 text-sm text-sunset-900'>
           {CLOSED_NOTE[listing.availability as keyof typeof CLOSED_NOTE]}
         </p>
+      )}
+
+      {listing.agent && contact.showAgentsOnListings && (
+        <div className='mt-5 flex items-center gap-3 rounded-2xl bg-muted/60 p-3'>
+          <Image
+            src={listing.agent.photoUrl}
+            alt=''
+            width={44}
+            height={44}
+            className='size-11 shrink-0 rounded-xl object-cover'
+          />
+          <p className='min-w-0 text-sm'>
+            <span className='block text-muted-foreground'>Listed by</span>
+            <span className='block truncate font-medium'>{listing.agent.name}</span>
+          </p>
+        </div>
       )}
 
       <div className='mt-6 border-t pt-6'>

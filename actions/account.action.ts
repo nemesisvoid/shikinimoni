@@ -1,7 +1,8 @@
 'use server';
 
-import { revalidatePath } from 'next/cache';
-import { assertAdmin } from '@/lib/auth/guards';
+import { revalidatePath, updateTag } from 'next/cache';
+import { assertStaff } from '@/lib/auth/guards';
+import { LISTINGS_TAG } from '@/lib/listings/tags';
 import { auth } from '@/lib/auth/server';
 import { prisma } from '@/lib/db';
 import { parseFormData } from '@/schemas/form-data';
@@ -22,9 +23,9 @@ export type PasswordState =
 const TRY_AGAIN = "That didn't save. Try again in a moment.";
 const RATE_LIMITED = 'Too many attempts. Wait a minute, then try again.';
 
-/** Your profile → name. Shown in the admin sidebar and on enquiries you handle. */
+/** Your profile → name, for admins and agents. Shown in the sidebar, on enquiries you handle, and as an agent's "Listed by". */
 export async function updateProfile(_prev: ProfileState, formData: FormData): Promise<ProfileState> {
-  const admin = await assertAdmin();
+  const admin = await assertStaff();
   const parsed = parseFormData(ProfileSchema, formData);
   if (!parsed.success) {
     return { status: 'error', message: 'Check your name.', fieldErrors: { name: parsed.fieldErrors.name?.[0] } };
@@ -45,6 +46,8 @@ export async function updateProfile(_prev: ProfileState, formData: FormData): Pr
     .catch(e => console.error('Audit log for updateProfile failed:', e));
 
   revalidatePath('/admin', 'layout');
+  revalidatePath('/agent', 'layout');
+  updateTag(LISTINGS_TAG); // an agent's name can show as "Listed by"
   return { status: 'saved', message: 'Name saved.', savedAt: Date.now(), name };
 }
 
@@ -53,7 +56,7 @@ export async function updateProfile(_prev: ProfileState, formData: FormData): Pr
  * device is signed out; this one stays signed in.
  */
 export async function changePassword(_prev: PasswordState, formData: FormData): Promise<PasswordState> {
-  const admin = await assertAdmin();
+  const admin = await assertStaff();
   const parsed = parseFormData(ChangePasswordSchema, formData);
   if (!parsed.success) {
     const fe = parsed.fieldErrors;

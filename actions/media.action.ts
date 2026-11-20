@@ -2,7 +2,8 @@
 
 import { revalidatePath, updateTag } from 'next/cache';
 import * as z from 'zod';
-import { assertAdmin } from '@/lib/auth/guards';
+import { checkEditAccess } from '@/lib/auth/guards';
+import { mergePendingChanges } from '@/lib/listings/pending';
 import { prisma } from '@/lib/db';
 import { LISTINGS_TAG } from '@/lib/listings/tags';
 import {
@@ -31,13 +32,14 @@ const NOT_CONFIGURED = "Photo storage isn't set up yet, so photos can't be uploa
  * The browser then PUTs each file straight to R2.
  */
 export async function requestPhotoUploads(input: unknown): Promise<Result<{ key: string; uploadUrl: string }[]>> {
-  await assertAdmin(); // throws for signed-out / non-admin callers
-
-  if (!isStorageConfigured('media')) return { ok: false, error: NOT_CONFIGURED };
-
   const parsed = RequestPhotoUploadsSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: firstError(parsed.error) };
   const { propertyId, files } = parsed.data;
+  // Admins, or the listing's own agent. Throws for anyone else.
+  const access = await checkEditAccess(propertyId);
+  if (!access.ok) return { ok: false, error: access.error };
+
+  if (!isStorageConfigured('media')) return { ok: false, error: NOT_CONFIGURED };
 
   const property = await prisma.property.findFirst({
     where: { id: propertyId, deletedAt: null },
@@ -66,13 +68,15 @@ export async function requestPhotoUploads(input: unknown): Promise<Result<{ key:
 export async function attachPropertyPhotos(
   input: unknown,
 ): Promise<Result<{ photos: { id: string; storageKey: string; url: string }[] }>> {
-  const admin = await assertAdmin();
-
-  if (!isStorageConfigured('media')) return { ok: false, error: NOT_CONFIGURED };
-
   const parsed = AttachPhotosSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: firstError(parsed.error) };
   const { propertyId, photos } = parsed.data;
+  const access = await checkEditAccess(propertyId);
+  if (!access.ok) return { ok: false, error: access.error };
+  // An agent adding photos to a live listing: stored, but hidden until approved.
+  const pending = access.mode === 'pending';
+
+  if (!isStorageConfigured('media')) return { ok: false, error: NOT_CONFIGURED };
 
   // Only keys issued for this property (step 1 puts them under its prefix).
   const prefix = `properties/${propertyId}/`;
@@ -109,7 +113,7 @@ export async function attachPropertyPhotos(
 
     const last = await tx.propertyMedia.aggregate({ where: { propertyId }, _max: { sortOrder: true } });
     const start = (last._max.sortOrder ?? -1) + 1;
-    const needsCover = property.media.length === 0;
+    const needsCover = !pending && property.media.length === 0;
 
     return tx.propertyMedia.createManyAndReturn({
       select: { id: true, storageKey: true, url: true },
@@ -126,7 +130,8 @@ export async function attachPropertyPhotos(
         height: photo.height ?? null,
         sortOrder: start + i,
         isCover: needsCover && i === 0,
-        uploadedById: admin.id,
+        pendingReview: pending,
+        uploadedById: access.user.id,
       })),
     });
   });
@@ -135,8 +140,7 @@ export async function attachPropertyPhotos(
     await deleteObjects('media', photos.map((p) => p.storageKey));
     return { ok: false, error: 'That property no longer exists.' };
   }
-  revalidatePath('/admin', 'layout');
-  updateTag(LISTINGS_TAG); // photos and shared documents show on the public property page
+  revalidateFor(pending);
   return {
     ok: true,
     data: { photos: created.map((m) => ({ id: m.id, storageKey: m.storageKey!, url: m.url })) },
@@ -149,11 +153,11 @@ export async function attachPropertyPhotos(
  * the database and from R2. Every id must belong to this property.
  */
 export async function arrangePropertyPhotos(input: unknown): Promise<Result<null>> {
-  await assertAdmin();
-
   const parsed = ArrangePhotosSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: firstError(parsed.error) };
   const { propertyId, photos, removedIds } = parsed.data;
+  const access = await checkEditAccess(propertyId);
+  if (!access.ok) return { ok: false, error: access.error };
   const keepIds = photos.map((p) => p.id);
   if (removedIds.some((id) => keepIds.includes(id))) {
     return { ok: false, error: 'A photo is marked both kept and removed.' };
@@ -161,10 +165,26 @@ export async function arrangePropertyPhotos(input: unknown): Promise<Result<null
 
   const owned = await prisma.propertyMedia.findMany({
     where: { propertyId, id: { in: [...keepIds, ...removedIds] } },
-    select: { id: true, storageKey: true },
+    select: { id: true, storageKey: true, pendingReview: true },
   });
   if (owned.length !== keepIds.length + removedIds.length) {
     return { ok: false, error: 'Some photos changed since this page loaded. Refresh the page and try again.' };
+  }
+
+  if (access.mode === 'pending') {
+    // A live listing: remember the agent's arrangement for review. Only their
+    // own pending uploads are deleted now; live photos stay until approval.
+    const dropped = owned.filter((m) => removedIds.includes(m.id) && m.pendingReview);
+    if (dropped.length > 0) {
+      await prisma.propertyMedia.deleteMany({ where: { id: { in: dropped.map((m) => m.id) } } });
+      const keys = dropped.map((m) => m.storageKey).filter((k): k is string => !!k);
+      if (keys.length > 0 && isStorageConfigured('media')) {
+        await deleteObjects('media', keys).catch((error) => console.error('Photo cleanup failed:', error));
+      }
+    }
+    await mergePendingChanges(propertyId, { photos: photos.map((p) => ({ id: p.id, altText: p.altText ?? null })) });
+    revalidateFor(true);
+    return { ok: true, data: null };
   }
 
   await prisma.$transaction([
@@ -174,7 +194,8 @@ export async function arrangePropertyPhotos(input: unknown): Promise<Result<null
     ...photos.map((photo, i) =>
       prisma.propertyMedia.update({
         where: { id: photo.id },
-        data: { sortOrder: i, isCover: i === 0, altText: photo.altText ?? null },
+        // pendingReview: false — a kept photo is a normal photo from now on.
+        data: { sortOrder: i, isCover: i === 0, altText: photo.altText ?? null, pendingReview: false },
       }),
     ),
   ]);
@@ -186,9 +207,15 @@ export async function arrangePropertyPhotos(input: unknown): Promise<Result<null
     await deleteObjects('media', removedKeys).catch((error) => console.error('Photo cleanup failed:', error));
   }
 
-  revalidatePath('/admin', 'layout');
-  updateTag(LISTINGS_TAG); // photos and shared documents show on the public property page
+  revalidateFor(false);
   return { ok: true, data: null };
+}
+
+/** Pending uploads only show in the agent area and the review queue; anything else can show on the site. */
+function revalidateFor(pending: boolean) {
+  revalidatePath('/admin', 'layout');
+  revalidatePath('/agent', 'layout');
+  if (!pending) updateTag(LISTINGS_TAG); // photos show on the public property page
 }
 
 function firstError(error: z.ZodError) {
